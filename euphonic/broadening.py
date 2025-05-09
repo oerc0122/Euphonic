@@ -2,7 +2,7 @@
 Functions for broadening spectra
 """
 from collections.abc import Callable
-from typing import Literal
+from enum import Enum, auto
 import warnings
 
 import numpy as np
@@ -14,9 +14,48 @@ from scipy.stats import norm
 
 from euphonic.ureg import ureg
 
-ErrorFit = Literal['cheby-log', 'cubic']
-KernelShape = Literal['gauss', 'lorentz']
+BAD_ARGUMENT = 'Argument must be `str`. Received {}'
 
+class KWEnum(Enum):
+
+    @classmethod
+    def _missing_(cls, value):
+        if not isinstance(value, str):
+            raise TypeError(BAD_ARGUMENT.format(type(value).__name__))
+
+        value = value.replace('-', '_').upper()
+
+        for member in cls.members:
+            if member.name == value:
+                return member
+
+        return None
+
+    def __str__(self) -> str:
+        return self.name.lower()
+
+class ErrorFit(KWEnum):
+    """Fitting residual methods."""
+
+    CHEBY_LOG = auto()
+    CUBIC = auto()
+
+class KernelShape(KWEnum):
+    """Convolution kernel shape."""
+
+    LORENTZIAN = auto()
+    LORENTZ = LORENTZIAN
+    GAUSSIAN = auto()
+    GAUSS = GAUSSIAN
+
+
+class WidthConvention(KWEnum):
+    """Means of determining peak width."""
+
+    FULL_WIDTH_HALF_MAX = auto()
+    FWHM = FULL_WIDTH_HALF_MAX
+    STANDARD_DEVIATION = auto()
+    STD = STANDARD_DEVIATION
 
 # Conversion factor from Gaussian standard deviation to FWHM
 SIGMA_TO_FWHM = np.sqrt(8 * np.log(2))
@@ -29,10 +68,10 @@ def variable_width_broadening(
     width_function: Callable[[Quantity], Quantity],
     weights: np.ndarray | Quantity,
     width_lower_limit: Quantity = None,
-    width_convention: Literal['fwhm', 'std'] = 'fwhm',
+    width_convention: WidthConvention = WidthConvention.FWHM,
     adaptive_error: float = 1e-2,
-    shape: KernelShape = 'gauss',
-    fit: ErrorFit = 'cheby-log',
+    shape: KernelShape = KernelShape.GAUSS,
+    fit: ErrorFit = ErrorFit.CHEBY_LOG,
     ) -> Quantity:
     r"""Apply x-dependent Gaussian broadening to 1-D data series
 
@@ -74,16 +113,23 @@ def variable_width_broadening(
         'cheby-log' is recommended: for shape 'gauss', 'cubic' is also
         available.
     """
+    width_convention = WidthConvention(width_convention)
+    shape = KernelShape(shape)
 
-    if width_convention.lower() == 'fwhm' and shape == 'gauss':
-        sigma_function = (lambda x: width_function(x) * FWHM_TO_SIGMA)
-    elif width_convention.lower() == 'std' and shape == 'lorentz':
-        raise ValueError('Standard deviation unavailable for Lorentzian '
-                         'function: please use FWHM.')
-    elif width_convention.lower() in ('std', 'fwhm'):
-        sigma_function = width_function
-    else:
-        raise ValueError('width_convention must be "std" or "fwhm".')
+
+    match width_convention, shape:
+        case (WidthConvention.FWHM, KernelShape.GAUSS):
+            sigma_function = (lambda x: width_function(x) * FWHM_TO_SIGMA)
+
+        case (WidthConvention.STD, KernelShape.LORENTZ):
+            raise ValueError('Standard deviation unavailable for Lorentzian '
+                             'function: please use FWHM.')
+
+        case (WidthConvention.STD | WidthConvention.FWHM, _):
+            sigma_function = width_function
+
+        case _:
+            raise ValueError('width_convention must be "std" or "fwhm".')
 
     widths = sigma_function(x)
 
@@ -111,8 +157,8 @@ def width_interpolated_broadening(
     widths: Quantity,
     weights: np.ndarray,
     adaptive_error: float,
-    shape: KernelShape = 'gauss',
-    fit: ErrorFit = 'cheby-log',
+    shape: KernelShape = KernelShape.GAUSS,
+    fit: ErrorFit = ErrorFit.CHEBY_LOG,
     ) -> Quantity:
     """
     Uses a fast, approximate method to broaden a spectrum
@@ -167,40 +213,41 @@ def _lorentzian(x: np.ndarray, gamma: np.ndarray) -> np.ndarray:
 
 
 def _get_spacing(error,
-                 shape: KernelShape = 'gauss',
-                 fit: ErrorFit = 'cheby-log'):
+                 shape: KernelShape = KernelShape.GAUSS,
+                 fit: ErrorFit = ErrorFit.CHEBY_LOG):
     """
     Determine suitable spacing value for mode_width given accepted error level
 
     Coefficients have been fitted to plots of error vs spacing value
     """
 
-    if fit == 'cubic' and shape == 'gauss':
+    if fit is ErrorFit.CUBIC and shape is KernelShape.GAUSS:
         return np.polyval([612.7, -122.7, 15.40, 1.0831], error)
 
-    if fit != 'cheby-log':
+    if fit is not ErrorFit.CHEBY_LOG:
         raise ValueError(f'Fit "{fit}" is not available for shape "{shape}". '
                          f'The "cheby-log" fit is recommended for "gauss" and '
                          f'"Lorentz" shapes.')
 
-    if shape == 'lorentz':
-        cheby = Chebyshev(
-            [1.26039672, 0.39900457, 0.20392176, 0.08602507,
-             0.03337662, 0.00878684, 0.00619626],
-            window=[1., 1.],
-            domain=[-4.99146317, -1.34655197])
-        safe_domain = [-4, -1.35]
+    match shape:
+        case KernelShape.LORENTZ:
+            cheby = Chebyshev(
+                [1.26039672, 0.39900457, 0.20392176, 0.08602507,
+                 0.03337662, 0.00878684, 0.00619626],
+                window=[1., 1.],
+                domain=[-4.99146317, -1.34655197])
+            safe_domain = [-4, -1.35]
 
-    else:  # gauss
-        cheby = Chebyshev(
-            [1.25885858, 0.39803148, 0.20311735, 0.08654827,
-             0.03447873, 0.00894006, 0.00715706],
-            window=[-1., 1.],
-            domain=[-4.64180022, -1.00029948])
-        safe_domain = [-4, -1.]
+        case KernelShape.GAUSS:
+            cheby = Chebyshev(
+                [1.25885858, 0.39803148, 0.20311735, 0.08654827,
+                 0.03447873, 0.00894006, 0.00715706],
+                window=[-1., 1.],
+                domain=[-4.64180022, -1.00029948])
+            safe_domain = [-4, -1.]
 
     log_error = np.log10(error)
-    if not safe_domain[0] < log_error < safe_domain[1]:
+    if safe_domain[0] > log_error > safe_domain[1]:
         raise ValueError('Target error is out of fit range; value must lie'
                          f' in range {np.power(10, safe_domain)}.')
     return cheby(log_error)
@@ -212,14 +259,17 @@ def _width_interpolated_broadening(
     widths: np.ndarray,
     weights: np.ndarray,
     adaptive_error: float,
-    shape: KernelShape = 'gauss',
-    fit: ErrorFit = 'cheby-log') -> np.ndarray:
+    shape: KernelShape = KernelShape.GAUSS,
+    fit: ErrorFit = ErrorFit.CHEBY_LOG) -> np.ndarray:
     """
     Broadens a spectrum using a variable-width kernel, taking the
     same arguments as `variable_width` but expects arrays with
     consistent units rather than Quantities. Also returns an array
     rather than a Quantity.
     """
+    shape = KernelShape(shape)
+    fit = ErrorFit(fit)
+
     x = np.ravel(x)
     widths = np.ravel(widths)
     weights = np.ravel(weights)
@@ -245,12 +295,13 @@ def _width_interpolated_broadening(
     else:
         x_values = np.arange(-int(len(bins)/2), int(len(bins)/2)+1)*bin_width
 
-    if shape == 'gauss':
-        kernels = norm.pdf(x_values, scale=width_samples[:, np.newaxis],
-                           ) * bin_width
-    elif shape == 'lorentz':
-        kernels = _lorentzian(x_values, gamma=width_samples[:, np.newaxis],
-                              ) * bin_width
+    match shape:
+        case KernelShape.GAUSS:
+            kernels = norm.pdf(x_values, scale=width_samples[:, np.newaxis],
+                               ) * bin_width
+        case KernelShape.LORENTZ:
+            kernels = _lorentzian(x_values, gamma=width_samples[:, np.newaxis],
+                                  ) * bin_width
 
     kernels_idx = np.searchsorted(width_samples, widths, side='right')
 
@@ -287,7 +338,7 @@ def _width_interpolated_broadening(
 
 
 def find_coeffs(spacing: float,
-                shape: KernelShape = 'gauss') -> np.ndarray:
+                shape: KernelShape = KernelShape.GAUSS) -> np.ndarray:
     """"
     Function that, for a given spacing value, gives the coefficients of the
     polynomial which describes the relationship between kernel width and the
@@ -299,7 +350,7 @@ def find_coeffs(spacing: float,
         Scalar float. The spacing value between sigma (or gamma) samples at
         which the kernel is exactly calculated.
     shape
-        'gauss' or 'lorentz', selecting the type of broadening kernel.
+        Select the type of broadening kernel.
 
     Returns
     -------
@@ -307,13 +358,17 @@ def find_coeffs(spacing: float,
         Array containing the polynomial coefficients, with the highest
         power first
     """
+    shape = KernelShape(shape)
     width_values = np.linspace(1, spacing, num=10)
     x_range = np.linspace(-10, 10, num=101)
-    if shape == 'gauss':
-        actual_kernels = norm.pdf(x_range, scale=width_values[:, np.newaxis])
-    elif shape == 'lorentz':
-        actual_kernels = _lorentzian(x_range,
-                                     gamma=width_values[:, np.newaxis])
+
+    match shape:
+        case KernelShape.GAUSS:
+            actual_kernels = norm.pdf(x_range, scale=width_values[:, np.newaxis])
+        case KernelShape.LORENTZ:
+            actual_kernels = _lorentzian(x_range,
+                                         gamma=width_values[:, np.newaxis])
+
     lower_mix = np.zeros(len(width_values))
     ref_kernels = actual_kernels[[0, -1]].T
 
