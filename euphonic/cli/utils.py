@@ -7,6 +7,7 @@ from argparse import (
 from collections.abc import Collection, Sequence
 from contextlib import suppress
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -30,6 +31,7 @@ from euphonic import (
 )
 from euphonic.util import dedent_and_fill, mp_grid
 
+logger = logging.getLogger(__name__)
 
 def _load_euphonic_json(filename: str | os.PathLike,
                         frequencies_only: bool = False,
@@ -163,7 +165,7 @@ def load_data_from_file(filename: str | os.PathLike,
             '.json'.""")
         raise ValueError(msg)
     if verbose:
-        print(f'{data.__class__.__name__} data was loaded')
+        logger.info('%s data was loaded', type(data).__name__)
     return data
 
 
@@ -202,7 +204,7 @@ def matplotlib_save_or_show(save_filename: str | None = None) -> None:
     import matplotlib.pyplot as plt
     if save_filename is not None:
         plt.savefig(save_filename)
-        print(f'Saved plot to {os.path.realpath(save_filename)}')
+        logger.info('Saved plot to %s.', os.path.realpath(save_filename))
     else:
         plt.show()
 
@@ -353,10 +355,9 @@ def _bands_from_force_constants(data: ForceConstants,
     x_tick_labels = _get_tick_labels(bandpath)
     split_args = {'indices': _get_break_points(bandpath)}
 
-    print(
-        'Computing phonon modes: {n_modes} modes across {n_qpts} q-points'
-        .format(n_modes=(data.crystal.n_atoms * 3),
-                n_qpts=len(bandpath['explicit_kpoints_rel'])))
+    logger.info('Computing phonon modes: %d modes across %d q-points',
+                (data.crystal.n_atoms * 3),
+                len(bandpath['explicit_kpoints_rel']))
     qpts = bandpath['explicit_kpoints_rel']
 
     if frequencies_only:
@@ -392,8 +393,8 @@ def _get_debye_waller(temperature: Quantity,
     """
     mp_grid_spec = _grid_spec_from_args(fc.crystal, grid=grid,
                                         grid_spacing=grid_spacing)
-    print('Calculating Debye-Waller factor on {} q-point grid'
-          .format(' x '.join(map(str, mp_grid_spec))))
+    print('Calculating Debye-Waller factor on %s q-point grid',
+          ' x '.join(map(str, mp_grid_spec)))
     dw_phonons = fc.calculate_qpoint_phonon_modes(
         mp_grid(mp_grid_spec), **calc_modes_kwargs)
     return dw_phonons.calculate_debye_waller(temperature)

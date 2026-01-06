@@ -145,11 +145,11 @@ select = [
        "FURB",    # refurb
        "RUF",     # Ruff-specific rules
        "TRY",     # tryceratops
+       "T20",     # flake8-print
 ]
 ignore = [
        "S101",    # Use of except
        "CPY001",  # Missing copyright notice at top of every file. Not for us.
-       "T20",     # flake8-print forbids use of print and pprint.
        "PERF203", # No try-except in loop. Micro-optimisation, not relevant for Py 3.11+
        "PLE1300", # Pint introduces format character P, ruff doesn't recognise it
        ]

@@ -1,5 +1,6 @@
 """Functions for averaging spectra in spherical q bins"""
 
+import logging
 from typing import Literal, Optional
 
 import numpy as np
@@ -16,6 +17,7 @@ from euphonic import (
 )
 from euphonic.util import RNG, get_reference_data, mp_grid, rng
 
+logger = logging.getLogger(__name__)
 SphericalSamplingOptions = Literal['golden',
                                    'sphere-projected-grid',
                                    'spherical-polar-grid',
@@ -459,6 +461,6 @@ def _check_gridpts(npts: int) -> int:
     n_cols = int(np.ceil(np.sqrt(npts / 2)))
     actual_npts = n_cols**2 * 2
     if actual_npts != npts:
-        print('Requested npts ∉ {2x^2, x ∈ Z, x > 1}; '
-              f'rounding up to {npts}.')
+        logger.warning('Requested npts ∉ {2x^2, x ∈ Z, x > 1}; '
+                       'rounding up to %d.', npts)
     return n_cols

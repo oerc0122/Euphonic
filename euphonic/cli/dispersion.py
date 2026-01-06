@@ -1,4 +1,5 @@
 from argparse import ArgumentParser
+import logging
 from typing import Optional
 
 import matplotlib.style
@@ -21,6 +22,7 @@ from .utils import (
     matplotlib_save_or_show,
 )
 
+logger = logging.getLogger(__name__)
 
 def main(params: Optional[list[str]] = None) -> None:
     args = get_args(get_parser(), params)
@@ -38,7 +40,7 @@ def main(params: Optional[list[str]] = None) -> None:
             msg)
 
     if isinstance(data, ForceConstants):
-        print('Getting band path...')
+        logger.info('Getting band path...')
         q_distance = _get_q_distance(args.length_unit, args.q_spacing)
         (bands, x_tick_labels, split_args) = _bands_from_force_constants(
             data, q_distance=q_distance, frequencies_only=frequencies_only,
@@ -56,7 +58,7 @@ def main(params: Optional[list[str]] = None) -> None:
 
     bands.frequencies_unit = args.energy_unit
 
-    print('Mapping modes to 1D band-structure')
+    logger.info('Mapping modes to 1D band-structure')
     if args.reorder:
         bands.reorder_frequencies()
 

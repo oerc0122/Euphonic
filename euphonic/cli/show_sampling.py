@@ -1,5 +1,6 @@
 from argparse import ArgumentParser
 from typing import Optional
+import logging
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
@@ -9,6 +10,8 @@ import euphonic.sampling
 from euphonic.util import zips
 
 from .utils import get_args, matplotlib_save_or_show
+
+logger = logging.getLogger(__name__)
 
 choices_2d = {'golden-square', 'regular-square', 'recurrence-square'}
 choices_3d = {'golden-sphere', 'sphere-from-square-grid',
@@ -54,8 +57,8 @@ def main(params: Optional[list[str]] = None) -> None:
         npts = n_rows**2
 
         if npts != args.npts:
-            print('Requested npts ∉ {x^2, x ∈ Z, x > 1}; '
-                  f'rounding up to {npts}.')
+            logger.warning('Requested npts ∉ {x^2, x ∈ Z, x > 1}; '
+                           'rounding up to %d.', npts)
         ax.scatter(*zips(*euphonic.sampling.regular_square(n_rows, n_rows,
                                                            jitter=args.jitter,
                                                            rng=_get_rng())),
@@ -77,8 +80,8 @@ def main(params: Optional[list[str]] = None) -> None:
         npts = n_theta**2 * 2
 
         if npts != args.npts:
-            print('Requested npts ∉ {2x^2, x ∈ Z, x > 1}; '
-                  f'rounding up to {npts}.')
+            logger.warning('Requested npts ∉ {2x^2, x ∈ Z, x > 1}; '
+                           'rounding up to %d.', npts)
 
         ax.scatter(*zips(*euphonic.sampling.spherical_polar_grid(
             n_theta * 2, n_theta, jitter=args.jitter, rng=_get_rng())),
@@ -89,8 +92,8 @@ def main(params: Optional[list[str]] = None) -> None:
         npts = n_theta**2 * 2
 
         if npts != args.npts:
-            print('Requested npts ∉ {2x^2, x ∈ Z, x > 1}; '
-                  f'rounding up to {npts}.')
+            logger.warning('Requested npts ∉ {2x^2, x ∈ Z, x > 1}; '
+                           'rounding up to %d.', npts)
 
         ax.scatter(*zips(*euphonic.sampling.sphere_from_square_grid(
                 n_theta * 2, n_theta, jitter=args.jitter, rng=_get_rng())),

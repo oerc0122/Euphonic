@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 import copy
 import json
+import logging
 import os
 from typing import Any, TypeVar
 
@@ -11,6 +12,7 @@ from euphonic.version import __version__
 
 T = TypeVar('T')
 
+logger = logging.getLogger(__name__)
 
 def _to_json_dict(dictionary: dict[str, Any]) -> dict[str, Any]:
     """
@@ -112,7 +114,7 @@ def _obj_to_json_file(obj: T, filename: str) -> None:
     dout['__euphonic_version__'] = __version__
     with open(filename, 'w') as f:
         json.dump(dout, f, indent=4, sort_keys=True)
-    print(f'Written to {os.path.realpath(f.name)}')
+    logger.info(f'Written to %s', os.path.realpath(f.name))
 
 
 def _obj_from_json_file(cls: type[T], filename: str,

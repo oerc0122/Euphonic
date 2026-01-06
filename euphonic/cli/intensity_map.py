@@ -1,6 +1,6 @@
 from argparse import ArgumentParser
 from typing import Optional
-
+import logging
 import matplotlib.style
 
 import euphonic
@@ -22,6 +22,9 @@ from .utils import (
     load_data_from_file,
     matplotlib_save_or_show,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def main(params: Optional[list[str]] = None) -> None:
@@ -50,7 +53,7 @@ def main(params: Optional[list[str]] = None) -> None:
     recip_length_unit = q_spacing.units
 
     if isinstance(data, ForceConstants):
-        print('Getting band path...')
+        logger.info('Getting band path...')
         (modes, x_tick_labels, split_args) = _bands_from_force_constants(
             data, q_distance=q_spacing, insert_gamma=False,
             frequencies_only=frequencies_only,
@@ -64,7 +67,7 @@ def main(params: Optional[list[str]] = None) -> None:
     ebins = _get_energy_bins(modes, args.ebins + 1, emin=args.e_min,
                              emax=args.e_max)
 
-    print('Computing intensities and generating 2D maps')
+    logger.info('Computing intensities and generating 2D maps')
 
     if args.weighting.lower() == 'coherent':
         if args.temperature is not None:
@@ -91,7 +94,7 @@ def main(params: Optional[list[str]] = None) -> None:
                      if args.energy_broadening else None),
             shape=args.shape, method='convolve')
 
-    print('Plotting figure')
+    logger.info('Plotting figure')
     plot_label_kwargs = _plot_label_kwargs(
         args, default_ylabel=f'Energy / {spectrum.y_data.units:~P}')
 
@@ -103,7 +106,7 @@ def main(params: Optional[list[str]] = None) -> None:
 
     spectra = spectrum.split(**split_args)  # type: List[Spectrum2D]
     if len(spectra) > 1:
-        print(f'Found {len(spectra)} regions in q-point path')
+        logger.info('Found %d regions in q-point path', len(spectra))
 
     if args.save_json:
         spectrum.to_json_file(args.save_json)

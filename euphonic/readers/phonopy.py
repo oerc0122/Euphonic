@@ -1,4 +1,5 @@
 from contextlib import suppress
+import logging
 import os
 import re
 from typing import Any, Optional, TextIO
@@ -9,6 +10,7 @@ import numpy as np
 from euphonic.ureg import ureg
 from euphonic.util import convert_fc_phases, dedent_and_fill
 
+logger = logging.getLogger(__name__)
 
 # h5py can't be called from Matlab, so import as late as possible to
 # minimise impact. Do the same with yaml for consistency
@@ -491,8 +493,8 @@ def _extract_summary(filename: str, fc_extract: bool = False,
         default_units = {'atomic_mass': 'AMU',
                          'length': 'Angstrom',
                          'force_constants': 'eV/Angstrom^2'}
-        print(f'physical_unit key not found in {filename}, assuming '
-              f'the following units: {default_units}')
+        logger.WARNING('physical_unit key not found in %s, assuming '
+                       'the following units: %s', filename, default_units)
         pu = default_units
     # Format units so they can be read by Pint
     pu['atomic_mass'] = pu['atomic_mass'].replace('AMU', 'amu')
@@ -703,8 +705,10 @@ def read_interpolation_data(
             if fc_format not in hdf5_exts:
                 fc_format = 'phonopy'
         fc_pathname = os.path.join(path, fc_name)
-        print(f'Force constants not found in {summary_pathname}, '
-               f'attempting to read from {fc_pathname}')
+        logger.warning('Force constants not found in %s, '
+                        'attempting to read from %s.',
+                        summary_pathname,
+                        fc_pathname)
         n_atoms = summary_dict['n_atoms']
         n_cells = int(len(summary_dict['sc_atom_r'])/n_atoms)
         if fc_format == 'phonopy':
@@ -726,8 +730,10 @@ def read_interpolation_data(
     if (born_name is not None and
             len(dipole_keys & summary_dict.keys()) != len(dipole_keys)):
         born_pathname = os.path.join(path, born_name)
-        print(f'Born, dielectric not found in {summary_pathname}, '
-               f'attempting to read from {born_pathname}')
+        logger.warning('Born, dielectric not found in %s, '
+                       'attempting to read from %s.',
+                       summary_pathname,
+                       born_pathname)
         with open(born_pathname) as born_file:
             born_dict = _extract_born(born_file)
         # Let BORN file take priority, but merge because the 'nac_factor'

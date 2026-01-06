@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 from multiprocessing import cpu_count
 import textwrap
 from typing import Any, Optional, TypeVar
@@ -27,6 +28,7 @@ from euphonic import (
 )
 from euphonic.validate import _check_constructor_inputs
 
+logger = logging.getLogger(__name__)
 
 class BrilleInterpolator:
     """
@@ -217,7 +219,7 @@ class BrilleInterpolator:
         # basis positions and vectors
         bz = br.BrillouinZone(lattice)
 
-        print('Generating grid...')
+        logger.info('Generating grid...')
         vol = bz.ir_polyhedron.volume
         if grid_type == 'trellis':
             if grid_kwargs is None:
@@ -251,8 +253,8 @@ class BrilleInterpolator:
                     grid_kwargs = {'number_density': grid_npts}
             grid = br.BZNestQdc(bz, **grid_kwargs)
 
-        print(f'Grid generated with {len(grid.rlu)} q-points. '
-               'Calculating frequencies/eigenvectors...')
+        logger.info('Grid generated with %d q-points. '
+                    'Calculating frequencies/eigenvectors...', len(grid.rlu))
         if interpolation_kwargs is None:
             interpolation_kwargs = {}
         interpolation_kwargs['insert_gamma'] = False
@@ -272,7 +274,7 @@ class BrilleInterpolator:
         length_unit = 1 # angstrom units, i.e. Cartesian eigenvectors
         evecs_el = (*n_elems, rotates_like, length_unit)
         evecs_weight = (0., 1., 0.)
-        print('Filling grid...')
+        logger.info('Filling grid...')
         grid.fill(frequencies, freq_el, freq_weight, evecs, evecs_el,
                   evecs_weight)
         return cls(force_constants.crystal, grid)

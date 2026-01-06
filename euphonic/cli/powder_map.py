@@ -1,5 +1,6 @@
 from argparse import ArgumentParser
 from collections.abc import Callable, Sequence
+import logging
 from math import ceil
 from typing import Optional
 
@@ -43,6 +44,8 @@ except ModuleNotFoundError:
     except ModuleNotFoundError:
         def tqdm(sequence):
             return sequence
+
+logger = logging.getLogger(__name__)
 
 
 def get_parser() -> ArgumentParser:
@@ -155,7 +158,7 @@ def main(params: Optional[list[str]] = None) -> None:
             interpolation_kwargs=calc_modes_kwargs)
         calc_modes_kwargs = _brille_calc_modes_kwargs(args)
 
-    print('Setting up dimensions...')
+    logger.info('Setting up dimensions...')
     q_min = _get_q_distance(args.length_unit, args.q_min)
     q_max = _get_q_distance(args.length_unit, args.q_max)
     recip_length_unit = q_min.units
@@ -193,7 +196,10 @@ def main(params: Optional[list[str]] = None) -> None:
             temperature = None
             dw = None
 
-    print(f'Sampling {n_q_bins} |q| shells between {q_min:~P} and {q_max:~P}')
+    logger.info('Sampling %d |q| shells between %s and %s',
+                n_q_bins,
+                format(q_min, '~P'),
+                format(q_max, '~P'))
 
     z_data = np.empty((n_q_bins, len(energy_bins) - 1))
 
@@ -234,7 +240,7 @@ def main(params: Optional[list[str]] = None) -> None:
 
         z_data[q_index, :] = spectrum_1d.y_data.magnitude
 
-    print(f'Final npts: {npts}')
+    logger.info('Final npts: %d', npts)
 
     spectrum = euphonic.Spectrum2D(q_bin_edges, energy_bins,
                                    z_data * spectrum_1d.y_data.units)
@@ -248,7 +254,7 @@ def main(params: Optional[list[str]] = None) -> None:
                                   energy_unit=args.energy_unit))
 
     if not (args.e_i is None and args.e_f is None):
-        print('Applying kinematic constraints')
+        logger.info('Applying kinematic constraints')
         energy_unit = args.energy_unit
         e_i = args.e_i * ureg(energy_unit) if (args.e_i is not None) else None
         e_f = args.e_f * ureg(energy_unit) if (args.e_f is not None) else None
@@ -258,8 +264,10 @@ def main(params: Optional[list[str]] = None) -> None:
     if args.scale is not None:
         spectrum *= args.scale
 
-    print(f'Plotting figure: max intensity '
-          f'{np.nanmax(spectrum.z_data.magnitude) * spectrum.z_data.units:~P}')
+    logger.info('Plotting figure: max intensity %s',
+                format(np.nanmax(spectrum.z_data.magnitude) *
+                       spectrum.z_data.units,
+                       '~P'))
     plot_label_kwargs = _plot_label_kwargs(
         args, default_xlabel=f'|q| / {q_min.units:~P}',
         default_ylabel=f'Energy / {spectrum.y_data.units:~P}')

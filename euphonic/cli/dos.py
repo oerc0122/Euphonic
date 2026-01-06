@@ -1,4 +1,5 @@
 from argparse import ArgumentParser
+import logging
 from typing import Optional
 
 import matplotlib.style
@@ -24,6 +25,7 @@ from .utils import (
     matplotlib_save_or_show,
 )
 
+logger = logging.getLogger(__name__)
 
 def main(params: Optional[list[str]] = None) -> None:
     parser = get_parser()
@@ -74,9 +76,8 @@ def main(params: Optional[list[str]] = None) -> None:
         grid_spec = _grid_spec_from_args(data.crystal, grid=args.grid,
                                          grid_spacing=(args.grid_spacing
                                                        * recip_length_unit))
-        print('Calculating phonon modes '
-              'on {} q-point grid...'.format(
-                  ' x '.join([str(x) for x in grid_spec])))
+        logger.info('Calculating phonon modes on %s q-point grid...',
+                    ' x '.join(str(x) for x in grid_spec))
         if args.adaptive:
             cmkwargs = _calc_modes_kwargs(args)
             cmkwargs['return_mode_gradients'] = True
