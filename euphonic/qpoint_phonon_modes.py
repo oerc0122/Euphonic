@@ -48,7 +48,7 @@ class QpointPhononModes(QpointFrequencies):
     T = TypeVar('T', bound='QpointPhononModes')
 
     def __init__(self, crystal: Crystal, qpts: np.ndarray,
-                 frequencies: Quantity, eigenvectors: np.ndarray,
+                 frequencies: Quantity, eigenvectors: np.ndarray | None,
                  weights: np.ndarray | None = None) -> None:
         """
         Parameters

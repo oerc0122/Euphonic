@@ -93,8 +93,8 @@ def rand_spectrum2d(seed: int = 1,
         y_bins = np.linspace(*sorted([rng.random(), rng.random()]),
                              rng.integers(3, 10)) * ureg('meV')
     if metadata is None:
-        metadata = {'index': rng.integers(10),
-                    'value': rng.random(),
+        metadata = {'index': rng.integers(10, dtype=int),
+                    'value': rng.integers(1000, dtype=int),
                     'tag': 'common'}
 
     return Spectrum2D(x_data=x_bins,

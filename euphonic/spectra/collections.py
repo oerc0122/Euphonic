@@ -27,19 +27,18 @@ from typing_extensions import Self
 from euphonic.broadening import ErrorFit, KernelShape
 from euphonic.io import _obj_to_dict, _process_dict
 from euphonic.readers.castep import read_phonon_dos_data
-from euphonic.ureg import ureg
-from euphonic.util import dedent_and_fill
-from euphonic.validate import _check_constructor_inputs
-from euphonic.version import __version__
-
-from .base import (
+from euphonic.spectra.base import (
     CallableQuantity,
     Spectrum,
     Spectrum1D,
     Spectrum2D,
     XTickLabels,
 )
-from .base import OneSpectrumMetadata as OneLineData
+from euphonic.spectra.base import OneSpectrumMetadata as OneLineData
+from euphonic.ureg import ureg
+from euphonic.util import dedent_and_fill
+from euphonic.validate import _check_constructor_inputs
+from euphonic.version import __version__
 
 LineData = Sequence[OneLineData]
 Metadata = dict[str, str | int | LineData]
@@ -73,7 +72,10 @@ class SpectrumCollectionMixin(ABC):
     # value, ensuring _something_ was set.
     _bin_axes = ('x',)
     _spectrum_axis = 'y'
-    _item_type = Spectrum1D
+    _item_type: type[Spectrum]
+
+    metadata: dict[str, Any]
+    x_tick_labels: list[tuple[int, str]]
 
     # Define some private methods which wrap this information into useful forms
     @classmethod
@@ -457,7 +459,7 @@ class SpectrumCollectionMixin(ABC):
             group will be discarded
         """
         def get_key_items(enumerated_metadata: tuple[int, OneLineData],
-                          ) -> tuple[str | int, ...]:
+                          ) -> tuple[str | int | None, ...]:
             """Get sort keys from an item of enumerated input to groupby
 
             e.g. with line_data_keys=("a", "b")
@@ -491,7 +493,7 @@ class SpectrumCollectionMixin(ABC):
         return _obj_to_dict(self, attrs)
 
     @classmethod
-    def from_dict(cls: Self, d: dict) -> Self:
+    def from_dict(cls, d: dict) -> Self:
         """Initialise a Spectrum Collection object from dict"""
         data_keys = [f'{dim}_data' for dim in cls._bin_axes]
         data_keys.append(cls._spectrum_data_name())
@@ -628,7 +630,7 @@ class Spectrum1DCollection(SpectrumCollectionMixin,
 
     @classmethod
     def from_spectra(
-            cls: Self, spectra: Sequence[Spectrum1D], *, unsafe: bool = False,
+            cls, spectra: Sequence[Spectrum1D], *, unsafe: bool = False,
     ) -> Self:
         """Combine Spectrum1D to produce a new collection
 
@@ -695,7 +697,7 @@ class Spectrum1DCollection(SpectrumCollectionMixin,
         np.savetxt(filename, out_data, **kwargs)
 
     @classmethod
-    def from_castep_phonon_dos(cls: type[T], filename: str) -> T:
+    def from_castep_phonon_dos(cls, filename: str) -> Spectrum1DCollection:
         """
         Reads total DOS and per-element PDOS from a CASTEP
         .phonon_dos file
@@ -706,7 +708,7 @@ class Spectrum1DCollection(SpectrumCollectionMixin,
             The path and name of the .phonon_dos file to read
         """
         data = read_phonon_dos_data(filename)
-        n_spectra = len(data['dos'].keys())
+        n_spectra = len(data['dos'])
         dos_size = len(next(iter(data['dos'].values())))
         y_data = np.zeros((n_spectra, dos_size))
         metadata = {'line_data': [{} for x in range(n_spectra)]}
@@ -822,7 +824,7 @@ class Spectrum1DCollection(SpectrumCollectionMixin,
         raise TypeError(msg)
 
     @classmethod
-    def from_dict(cls: Self, d: dict) -> Self:
+    def from_dict(cls, d: dict) -> Self:
         """
         Convert a dictionary to a Spectrum Collection object
 

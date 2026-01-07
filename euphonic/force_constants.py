@@ -6,14 +6,16 @@ import re
 from typing import (
     Any,
     Literal,
-    TypeVar,
+    TypedDict,
 )
 import warnings
 
 import numpy as np
+import numpy.typing as npt
 from pint import Quantity
 from scipy.special import erfc
 from threadpoolctl import threadpool_info, threadpool_limits
+from typing_extensions import Self
 
 from euphonic.crystal import Crystal
 from euphonic.io import (
@@ -45,6 +47,15 @@ class NotEnoughAcousticModesError(Exception): ...
 class ImportCError(Exception):
     pass
 
+DipoleData = TypedDict('DipoleData',  # Functional syntax due to lambda
+                       {'dipole_parameter': float,
+                        'H_ab': npt.NDArray[np.float64],
+                        'cells': npt.NDArray[np.float64],
+                        'gvecs_cart': npt.NDArray[np.float64],
+                        'gvec_phases': npt.NDArray[np.float64],
+                        'dipole_q0': npt.NDArray[np.float64],
+                        'lambda': float,
+                        })
 
 class ForceConstants:
     """
@@ -76,7 +87,6 @@ class ForceConstants:
         Shape (3, 3) float Quantity in charge**2/(length*energy) units
         or None. The dielectric permittivity tensor
     """
-    T = TypeVar('T', bound='ForceConstants')
 
     def __init__(self, crystal: Crystal, force_constants: Quantity,
                  sc_matrix: np.ndarray, cell_origins: np.ndarray,
@@ -191,7 +201,7 @@ class ForceConstants:
             use_c: bool | None = None,
             n_threads: int | None = None,
             return_mode_gradients: bool = False,
-            ) -> QpointPhononModes | tuple[QpointPhononModes, Quantity]:
+            ) -> QpointPhononModes | tuple[QpointPhononModes, Quantity | None]:
         """
         Calculate phonon frequencies and eigenvectors at specified
         q-points from a force constants matrix via Fourier interpolation
@@ -421,7 +431,7 @@ class ForceConstants:
             use_c: bool | None = None,
             n_threads: int | None = None,
             return_mode_gradients: bool = False,
-            ) -> QpointFrequencies | tuple[QpointFrequencies, Quantity]:
+            ) -> QpointFrequencies | tuple[QpointFrequencies, Quantity | None]:
         """
         Calculate phonon frequencies (without eigenvectors) at specified
         q-points. See ForceConstants.calculate_qpoint_phonon_modes for
@@ -452,7 +462,7 @@ class ForceConstants:
             return_mode_gradients: bool,
             return_eigenvectors: bool) -> tuple[
                 np.ndarray, Quantity, np.ndarray | None,
-                np.ndarray | None, Quantity] | None:
+                np.ndarray | None, Quantity | None]:
         """
         Calculates phonon frequencies, and optionally eigenvectors and
         phonon frequency gradients. See calculate_qpoint_phonon_modes
@@ -556,7 +566,8 @@ class ForceConstants:
         # origins in x, y, z and how to rebuild them to minimise
         # expensive phase calculations later
         sc_image_r = get_all_origins(
-            np.repeat(n_sc_shells, 3) + 1, min_xyz=-np.repeat(n_sc_shells, 3))
+            (n_sc_shells + 1, n_sc_shells + 1, n_sc_shells + 1),
+            min_xyz=(-n_sc_shells, -n_sc_shells, -n_sc_shells))
         sc_origins = (sc_image_r @ self.sc_matrix).astype(np.int32)
         unique_sc_origins = [[] for i in range(3)]
         unique_sc_i = np.zeros((len(sc_origins), 3), dtype=np.int32)
@@ -587,9 +598,9 @@ class ForceConstants:
         dyn_mat_weighting = 1/np.sqrt(masses*np.transpose(masses))
 
         # Initialise dipole correction calc to FC matrix if required
-        if dipole and (not hasattr(self, '_dipole_init_data') or
-                       dipole_parameter != self._dipole_init_data[
-                           'dipole_parameter']):
+        if dipole and (
+            not hasattr(self, '_dipole_init_data')
+            or dipole_parameter != self._dipole_init_data['dipole_parameter']):
             self._dipole_init_data = self._dipole_correction_init(
                 self.crystal, self._born, self._dielectric, dipole_parameter)
 
@@ -886,7 +897,7 @@ casting to real mode gradients.
             unique_cell_origins: Sequence[Sequence[int]],
             unique_cell_i: np.ndarray,
             all_origins_cart: np.ndarray) -> tuple[np.ndarray,
-                                                   np.ndarray] | None:
+                                                   np.ndarray | None]:
         """
         Calculate the non mass weighted dynamical matrix at a specified
         q-point from the image weighted force constants matrix and the
@@ -978,7 +989,7 @@ casting to real mode gradients.
                                 born: np.ndarray,
                                 dielectric: np.ndarray,
                                 dipole_parameter: float = 1.0,
-                                ) -> dict[str, float | np.ndarray]:
+                                ) -> DipoleData:
         """
         Calculate the q-independent parts of the long range correction
         to the dynamical matrix for efficiency. The method used is based
@@ -1148,21 +1159,21 @@ casting to real mode gradients.
             # Symmetrise 3x3
             dipole_q0[i] = 0.5*(dipole_q0[i] + np.transpose(dipole_q0[i]))
 
-        dipole_init_data = {}
-        dipole_init_data['dipole_parameter'] = dipole_parameter
-        dipole_init_data['lambda'] = upper_lambda
-        dipole_init_data['H_ab'] = H_ab
-        dipole_init_data['cells'] = cells
-        dipole_init_data['gvecs_cart'] = gvecs_cart
-        dipole_init_data['gvec_phases'] = gvec_phases
-        dipole_init_data['dipole_q0'] = dipole_q0
-        return dipole_init_data
+        return {
+            'dipole_parameter': dipole_parameter,
+            'lambda': upper_lambda,
+            'H_ab': H_ab,
+            'cells': cells,
+            'gvecs_cart': gvecs_cart,
+            'gvec_phases': gvec_phases,
+            'dipole_q0': dipole_q0,
+        }
 
     @staticmethod
     def _calculate_dipole_correction(
             q: np.ndarray, crystal: Crystal, born: np.ndarray,
             dielectric: np.ndarray,
-            dipole_init_data: dict[str, float | np.ndarray],
+            dipole_init_data: DipoleData,
             ) -> np.ndarray:
         """
         Calculate the long range correction to the dynamical matrix
@@ -1626,7 +1637,8 @@ casting to real mode gradients.
 
         # Get Cartesian coords of supercell images and ions in supercell
         sc_image_r = get_all_origins(
-            np.repeat(n_sc_shells, 3) + 1, min_xyz=-np.repeat(n_sc_shells, 3))
+            (n_sc_shells + 1, n_sc_shells + 1, n_sc_shells + 1),
+            min_xyz=(-n_sc_shells, -n_sc_shells, -n_sc_shells))
         sc_image_cart = sc_image_r @ sc_vecs
         sc_atom_cart = np.einsum('ijk,kl->ijl',
                                  cell_origins[:, None, :] + atom_r[None, :, :],
@@ -1650,26 +1662,27 @@ casting to real mode gradients.
                 dists = rij - sc_r
                 # Only want to include images where ion < halfway to ALL
                 # ws points, so compare vector to all ws points
+
+                nc_idx, nj_idx = np.where(
+                    ws_list_norm[0] <= (0.5*cutoff_scale + 0.001),
+                )
+                # Reindex dists to remove elements where the ion
+                # is > halfway to WS point for efficiency
+                dists = dists[nc_idx, nj_idx]
+
                 for n, wsp in enumerate(ws_list_norm):
                     dist_wsp = np.absolute(np.sum(dists*wsp, axis=-1))
-                    if n == 0:
-                        nc_idx, nj_idx = np.where(
-                            dist_wsp <= (0.5*cutoff_scale + 0.001),
-                        )
-                        # Reindex dists to remove elements where the ion
-                        # is > halfway to WS point for efficiency
-                        dists = dists[nc_idx, nj_idx]
-                    else:
-                        # After first reindex, dists is now 1D so need
-                        # to reindex like this instead
-                        idx = np.where(
-                            dist_wsp <= (0.5*cutoff_scale + 0.001),
-                        )[0]
-                        nc_idx = nc_idx[idx]
-                        nj_idx = nj_idx[idx]
-                        dists = dists[idx]
+
+                    idx = np.where(
+                        dist_wsp <= (0.5*cutoff_scale + 0.001),
+                    )[0]
+                    nc_idx = nc_idx[idx]
+                    nj_idx = nj_idx[idx]
+                    dists = dists[idx]
+
                     if len(nc_idx) == 0:
                         break
+
                     # If ion-ion vector has been < halfway to all WS
                     # points, this is a valid image! Save it
                     if n == len(ws_list_norm) - 1:
@@ -1710,7 +1723,7 @@ casting to real mode gradients.
         _obj_to_json_file(self, filename)
 
     @classmethod
-    def from_dict(cls: type[T], d: dict[str, Any]) -> T:
+    def from_dict(cls, d: dict[str, Any]) -> Self:
         """
         Convert a dictionary to a ForceConstants object
 
@@ -1747,9 +1760,9 @@ casting to real mode gradients.
 
     @classmethod
     def from_total_fc_with_dipole(
-            cls: type[T], crystal: Crystal, force_constants: Quantity,
+            cls, crystal: Crystal, force_constants: Quantity,
             sc_matrix: np.ndarray, cell_origins: np.ndarray, born: Quantity,
-            dielectric: Quantity) -> T:
+            dielectric: Quantity | None) -> Self:
         """
         Subtracts a dipole term from the input force constants matrix
         to convert the 'total' force constants matrix containing both
@@ -1826,7 +1839,7 @@ casting to real mode gradients.
                    born=born, dielectric=dielectric)
 
     @classmethod
-    def from_json_file(cls: type[T], filename: str) -> T:
+    def from_json_file(cls, filename: str) -> Self:
         """
         Read from a JSON file. See ForceConstants.from_dict for required
         fields
@@ -1843,7 +1856,7 @@ casting to real mode gradients.
         return _obj_from_json_file(cls, filename)
 
     @classmethod
-    def from_castep(cls: type[T], filename: str) -> T:
+    def from_castep(cls, filename: str) -> Self:
         """
         Reads from a .castep_bin or .check file
 
@@ -1860,12 +1873,12 @@ casting to real mode gradients.
         return cls.from_dict(data)
 
     @classmethod
-    def from_phonopy(cls: type[T],
+    def from_phonopy(cls,
                      path: str = '.',
                      summary_name: str = 'phonopy.yaml',
                      born_name: str | None = None,
                      fc_name: str = 'FORCE_CONSTANTS',
-                     fc_format: str | None = None) -> T:
+                     fc_format: str | None = None) -> Self:
         """
         Reads data from the phonopy summary file (default phonopy.yaml)
         and optionally born and force constants files. Only attempts to

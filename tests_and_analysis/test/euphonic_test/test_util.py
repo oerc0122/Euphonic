@@ -43,14 +43,14 @@ class TestTextTools:
 class TestDirectionChanged:
 
     def test_direction_changed_nah(self):
-        qpts = [[-0.25, -0.25, -0.25],
-                [-0.25, -0.50, -0.50],
-                [0.00, -0.25, -0.25],
-                [0.00, 0.00, 0.00],
-                [0.00, -0.50, -0.50],
-                [0.25, 0.00, -0.25],
-                [0.25, -0.50, -0.25],
-                [-0.50, -0.50, -0.50]]
+        qpts = np.array([[-0.25, -0.25, -0.25],
+                         [-0.25, -0.50, -0.50],
+                         [0.00, -0.25, -0.25],
+                         [0.00, 0.00, 0.00],
+                         [0.00, -0.50, -0.50],
+                         [0.25, 0.00, -0.25],
+                         [0.25, -0.50, -0.25],
+                         [-0.50, -0.50, -0.50]])
         expected_direction_changed = [True, True, False, True, True, True]
         npt.assert_equal(direction_changed(qpts),
                          expected_direction_changed)
@@ -59,7 +59,7 @@ class TestDirectionChanged:
 class TestMPGrid:
 
     def test_444_grid(self):
-        qpts = mp_grid([4,4,4])
+        qpts = mp_grid((4, 4, 4))
         expected_qpts = np.loadtxt(
             get_data_path('util', 'qgrid_444.txt'))
         npt.assert_equal(qpts, expected_qpts)

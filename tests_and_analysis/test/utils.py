@@ -9,7 +9,7 @@ import pytest
 from euphonic import Spectrum1D, Spectrum1DCollection, __version__, ureg
 
 
-def get_data_path(*subpaths: tuple[str]) -> str:
+def get_data_path(*subpaths: str) -> str:
     """
     Get the path to test data file or directory
 
@@ -21,7 +21,7 @@ def get_data_path(*subpaths: tuple[str]) -> str:
                         'data', *subpaths)
 
 
-def get_phonopy_path(*subpaths: tuple[str]) -> str:
+def get_phonopy_path(*subpaths: str) -> str:
     """
     Get the path to a Phonopy data file or directory
 
@@ -32,7 +32,7 @@ def get_phonopy_path(*subpaths: tuple[str]) -> str:
     return get_data_path('phonopy_files', *subpaths)
 
 
-def get_castep_path(*subpaths: tuple[str]) -> str:
+def get_castep_path(*subpaths: str) -> str:
     """
     Get the path to a CASTEP data file or directory
 
