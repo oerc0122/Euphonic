@@ -136,7 +136,7 @@ class TestRegression:
                         xy_data[1][j, 1])
 
             markers = [ln.get_marker() for ax in fig.axes for ln in ax.lines]
-            linestyles = [ln.get_ls() for ax in fig.axes for ln in ax.lines]
+            linestyles = [ln.get_linestyle() for ax in fig.axes for ln in ax.lines]
             if i < 2:
                 assert all(mk == 'x' for mk in markers)  # scatter plots
                 assert all(ls == 'None' for ls in linestyles)

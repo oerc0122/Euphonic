@@ -132,8 +132,8 @@ def mp_grid(grid: tuple[int, int, int]) -> np.ndarray:
     return np.column_stack((qh, qk, ql))
 
 
-def get_all_origins(max_xyz: tuple[int, int, int],
-                    min_xyz: tuple[int, int, int] = (0, 0, 0),
+def get_all_origins(max_xyz: tuple[int, int, int] | npt.NDArray[int],
+                    min_xyz: tuple[int, int, int] | npt.NDArray[int] = (0, 0, 0),
                     step: int = 1) -> np.ndarray:
     """
     Given the max/min number of cells in each direction, get a list of

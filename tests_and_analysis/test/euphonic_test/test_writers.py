@@ -43,9 +43,9 @@ def modes_data(
     with open(ref_filename, encoding='utf8') as fd:
         ref_data = json.load(fd)
 
-    kwargs = {'output_file': 'phonons.json',
-              'name': 'Euphonic export',
-              'x_tick_labels': None}
+    kwargs: WritePhononWebsiteKwargs = {'output_file': 'phonons.json',
+                                        'name': 'Euphonic export',
+                                        'x_tick_labels': None}
 
     return (modes, kwargs, ref_data)
 
