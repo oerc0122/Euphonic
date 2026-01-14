@@ -12,17 +12,21 @@ from operator import contains
 from pathlib import Path
 from typing import (
     Any,
+    Generic,
     Literal,
+    SupportsIndex,
+    TypedDict,
     TypeVar,
     overload,
 )
 
 import numpy as np
+import numpy.typing as npt
 from pint import Quantity
 from toolz.dicttoolz import keyfilter, valmap
 from toolz.functoolz import complement
 from toolz.itertoolz import groupby, pluck
-from typing_extensions import Self
+from typing_extensions import NotRequired, Self
 
 from euphonic.broadening import ErrorFit, KernelShape
 from euphonic.io import _obj_to_dict, _process_dict
@@ -42,9 +46,23 @@ from euphonic.version import __version__
 
 LineData = Sequence[OneLineData]
 Metadata = dict[str, str | int | LineData]
+S = TypeVar('S', bound=Spectrum)
+
+class SpectrumData1D(TypedDict):
+    x_data: npt.NDArray[np.floating]
+    x_data_unit: str
+    y_data: npt.NDArray[np.floating]
+    y_data_unit: str
+
+    x_tick_labels: NotRequired[Sequence[tuple[int, str]] | None]
+    metadata: NotRequired[Metadata | None]
+
+class SpectrumData2D(SpectrumData1D):
+    z_data: npt.NDArray[np.floating]
+    z_data_unit: str
 
 
-class SpectrumCollectionMixin(ABC):
+class SpectrumCollectionMixin(ABC, Generic[S]):
     """Help a collection of spectra work with "line_data" metadata file
 
     This is a Mixin to be inherited by Spectrum collection classes
@@ -70,12 +88,17 @@ class SpectrumCollectionMixin(ABC):
     # purposes of splitting, indexing, etc.
     # Python doesn't support abstract class attributes so we define a default
     # value, ensuring _something_ was set.
-    _bin_axes = ('x',)
+    _bin_axes: tuple[Literal['x', 'y', 'z'], ...] = ('x',)
     _spectrum_axis = 'y'
-    _item_type: type[Spectrum]
+    _item_type: type[S]
 
     metadata: dict[str, Any]
-    x_tick_labels: list[tuple[int, str]]
+    x_tick_labels: Sequence[tuple[int, str]] | None
+
+    @abstractmethod
+    def __init__(self, *args,
+                 x_tick_labels: XTickLabels | None,
+                 metadata: Metadata | None): ...
 
     # Define some private methods which wrap this information into useful forms
     @classmethod
@@ -89,7 +112,7 @@ class SpectrumCollectionMixin(ABC):
     def _get_spectrum_data(self) -> Quantity:
         return getattr(self, self._spectrum_data_name())
 
-    def _get_raw_spectrum_data(self) -> np.ndarray:
+    def _get_raw_spectrum_data(self) -> npt.NDArray[np.floating]:
         return getattr(self, self._raw_spectrum_data_name())
 
     def _set_spectrum_data(self, data: Quantity) -> None:
@@ -109,18 +132,18 @@ class SpectrumCollectionMixin(ABC):
         return [f'{axis}_data' for axis in self._bin_axes]
 
     @classmethod
-    def _get_item_data(cls, item: Spectrum) -> Quantity:
+    def _get_item_data(cls, item: S) -> Quantity:
         return getattr(item, f'{cls._spectrum_axis}_data')
 
     @classmethod
-    def _get_item_raw_data(cls, item: Spectrum) -> np.ndarray:
+    def _get_item_raw_data(cls, item: S) -> np.ndarray:
         return getattr(item, f'_{cls._spectrum_axis}_data')
 
     @classmethod
-    def _get_item_data_unit(cls, item: Spectrum) -> str:
+    def _get_item_data_unit(cls, item: S) -> str:
         return getattr(item, f'{cls._spectrum_axis}_data_unit')
 
-    def sum(self) -> Spectrum:
+    def sum(self) -> S:
         """
         Sum collection to a single spectrum
 
@@ -153,7 +176,7 @@ class SpectrumCollectionMixin(ABC):
     @classmethod
     @abstractmethod
     def from_spectra(
-            cls, spectra: Sequence[Spectrum], *, unsafe: bool = False,
+            cls, spectra: Sequence[S], *, unsafe: bool = False,
     ) -> Self:
         """Construct spectrum collection from a sequence of components
 
@@ -168,7 +191,7 @@ class SpectrumCollectionMixin(ABC):
         return self._get_raw_spectrum_data().shape[0]
 
     @overload
-    def __getitem__(self, item: int) -> Spectrum: ...
+    def __getitem__(self, item: int) -> S: ...
 
     @overload
     def __getitem__(self, item: slice) -> Self: ...
@@ -196,8 +219,9 @@ class SpectrumCollectionMixin(ABC):
 
     def _set_item_data(
             self,
-            spectrum: Spectrum,
-            item: Integral | slice | Sequence[Integral] | np.ndarray,
+            spectrum: S,
+            item: SupportsIndex | slice |
+            Sequence[SupportsIndex] | npt.NDArray[np.integer],
     ) -> None:
         """Write axis and spectrum data from self to Spectrum
 
@@ -292,9 +316,9 @@ class SpectrumCollectionMixin(ABC):
         common_metadata = {key: value for key, value in self.metadata.items()
                            if key != 'line_data'}
 
-        line_data = self.metadata.get('line_data')
-        if line_data is None:
-            line_data = repeat({}, len(self._get_raw_spectrum_data()))
+        line_data = self.metadata.get('line_data',
+                                      repeat({},
+                                             len(self._get_raw_spectrum_data())))
 
         for one_line_data in line_data:
             yield common_metadata | one_line_data
@@ -493,7 +517,7 @@ class SpectrumCollectionMixin(ABC):
         return _obj_to_dict(self, attrs)
 
     @classmethod
-    def from_dict(cls, d: dict) -> Self:
+    def from_dict(cls, d: dict[str, Any]) -> Self:
         """Initialise a Spectrum Collection object from dict"""
         data_keys = [f'{dim}_data' for dim in cls._bin_axes]
         data_keys.append(cls._spectrum_data_name())
@@ -514,7 +538,7 @@ class SpectrumCollectionMixin(ABC):
             raise TypeError(msg)
 
 
-class Spectrum1DCollection(SpectrumCollectionMixin,
+class Spectrum1DCollection(SpectrumCollectionMixin[Spectrum1D],
                            Spectrum,
                            collections.abc.Sequence):
     """A collection of Spectrum1D with common x_data and x_tick_labels
@@ -548,7 +572,6 @@ class Spectrum1DCollection(SpectrumCollectionMixin,
                           the collection, and must be of length
                           n_entries
     """
-    T = TypeVar('T', bound='Spectrum1DCollection')
 
     # Private attributes used by SpectrumCollectionMixin
     _spectrum_axis = 'y'
@@ -697,7 +720,7 @@ class Spectrum1DCollection(SpectrumCollectionMixin,
         np.savetxt(filename, out_data, **kwargs)
 
     @classmethod
-    def from_castep_phonon_dos(cls, filename: Path | str) -> Spectrum1DCollection:
+    def from_castep_phonon_dos(cls, filename: Path | str) -> Self:
         """
         Reads total DOS and per-element PDOS from a CASTEP
         .phonon_dos file
@@ -718,28 +741,28 @@ class Spectrum1DCollection(SpectrumCollectionMixin,
             if species != 'Total':
                 metadata['line_data'][i]['species'] = species
             metadata['line_data'][i]['label'] = species
-        return Spectrum1DCollection(
+        return cls(
             ureg.Quantity(data['dos_bins'], units=data['dos_bins_unit']),
             ureg.Quantity(y_data, units=data['dos_unit']),
             metadata=metadata)
 
     @overload
-    def broaden(self: T, x_width: Quantity,
+    def broaden(self, x_width: Quantity,
                 shape: KernelShape = 'gauss',
                 method: Literal['convolve'] | None = None,
-                ) -> T: ...
+                ) -> Self: ...
 
     @overload
-    def broaden(self: T, x_width: CallableQuantity,
+    def broaden(self, x_width: CallableQuantity,
                 shape: KernelShape = 'gauss',
                 method: Literal['convolve'] | None = None,
                 width_lower_limit: Quantity | None = None,
                 width_convention: Literal['fwhm', 'std'] = 'fwhm',
                 width_interpolation_error: float = 0.01,
                 width_fit: ErrorFit = 'cheby-log',
-                ) -> T: ...
+                ) -> Self: ...
 
-    def broaden(self: T,
+    def broaden(self,
                 x_width,
                 shape='gauss',
                 method=None,
@@ -747,7 +770,7 @@ class Spectrum1DCollection(SpectrumCollectionMixin,
                 width_convention='fwhm',
                 width_interpolation_error=0.01,
                 width_fit='cheby-log',
-                ) -> T:
+                ) -> Self:
         """
         Individually broaden each line in y_data, returning a new
         Spectrum1DCollection
@@ -824,7 +847,7 @@ class Spectrum1DCollection(SpectrumCollectionMixin,
         raise TypeError(msg)
 
     @classmethod
-    def from_dict(cls, d: dict) -> Self:
+    def from_dict(cls, d: SpectrumData1D) -> Self:
         """
         Convert a dictionary to a Spectrum Collection object
 
@@ -850,7 +873,7 @@ class Spectrum1DCollection(SpectrumCollectionMixin,
         return super().from_dict(d)
 
 
-class Spectrum2DCollection(SpectrumCollectionMixin,
+class Spectrum2DCollection(SpectrumCollectionMixin[Spectrum2D],
                            Spectrum,
                            collections.abc.Sequence):
     """A collection of Spectrum2D with common x_data, y_data and x_tick_labels
@@ -893,6 +916,9 @@ class Spectrum2DCollection(SpectrumCollectionMixin,
     _bin_axes = ('x', 'y')
     _spectrum_axis = 'z'
     _item_type = Spectrum2D
+
+    _z_data: npt.NDArray[np.floating]
+    _internal_z_data_unit: str
 
     def __init__(
             self, x_data: Quantity, y_data: Quantity, z_data: Quantity,

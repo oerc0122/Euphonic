@@ -106,8 +106,7 @@ class StructureFactor(QpointFrequencies):
     def temperature(self) -> Quantity:
         if self._temperature is not None:
             # See https://pint.readthedocs.io/en/latest/nonmult.html
-            return Quantity(self._temperature,
-                            ureg('K')).to(self.temperature_unit)
+            return Quantity(self._temperature, 'K').to(self.temperature_unit)
         return None
 
     @temperature.setter
@@ -340,7 +339,7 @@ class StructureFactor(QpointFrequencies):
         if temperature > 0:
             bose = 1/(np.exp(np.absolute(self._frequencies)/(k_B*temp)) - 1)
         else:
-            bose = 0
+            bose[:] = 0
         return bose
 
     def to_dict(self) -> dict[str, Any]:
@@ -391,11 +390,11 @@ class StructureFactor(QpointFrequencies):
                    d['temperature'])
 
     @classmethod
-    def from_castep(cls: type[T]) -> NoReturn:
+    def from_castep(cls, *_) -> NoReturn:
         ""
         raise AttributeError
 
     @classmethod
-    def from_phonopy(cls: type[T]) -> NoReturn:
+    def from_phonopy(cls, *_) -> NoReturn:
         ""
         raise AttributeError

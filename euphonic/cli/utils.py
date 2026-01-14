@@ -31,7 +31,7 @@ from euphonic import (
 from euphonic.util import dedent_and_fill, mp_grid
 
 
-def _load_euphonic_json(filename: str | os.PathLike,
+def _load_euphonic_json(filename: str | Path,
                         frequencies_only: bool = False,
 ) -> QpointPhononModes | QpointFrequencies | ForceConstants:
     with open(filename) as f:

@@ -1,14 +1,16 @@
 """Classes for spectral data"""
 # pylint: disable=no-member
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 import copy
+from enum import Enum
 from functools import partial
 import math
 from numbers import Integral, Real
-from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
     Literal,
     cast,
@@ -17,9 +19,10 @@ from typing import (
 import warnings
 
 import numpy as np
+import numpy.typing as npt
 from pint import DimensionalityError, Quantity
 from scipy.ndimage import correlate1d, gaussian_filter
-from typing_extensions import Self
+from typing_extensions import Self, override
 
 from euphonic.broadening import (
     FWHM_TO_SIGMA,
@@ -38,6 +41,14 @@ from euphonic.ureg import ureg
 from euphonic.util import dedent_and_fill, zips
 from euphonic.validate import _check_constructor_inputs, _check_unit_conversion
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+class Axes(Enum):
+    x = 0
+    y = 1
+
+
 CallableQuantity = Callable[[Quantity], Quantity]
 XTickLabels = Sequence[tuple[int, str]]
 
@@ -49,6 +60,17 @@ class WidthTypeError(TypeError): ...
 
 class Spectrum(ABC):
     """Base class for a spectral data: do not use directly"""
+
+
+    _x_data: npt.NDArray[np.floating]
+    _y_data: npt.NDArray[np.floating]
+    _internal_x_data_unit: str
+    _internal_y_data_unit: str
+
+    @abstractmethod
+    def __init__(self, *args,
+                 x_tick_labels: XTickLabels | None,
+                 metadata: OneSpectrumMetadata | None, **kwargs): ...
 
     def __setattr__(self, name: str, value: Any) -> None:
         _check_unit_conversion(self, name, value,
@@ -83,28 +105,30 @@ class Spectrum(ABC):
         self.y_data_unit = str(value.units)
         self._y_data = value.to(self._internal_y_data_unit).magnitude
 
-    def __imul__(self: Self, other: Real) -> Self:
+    def __imul__(self, other: Real) -> Self:
         """Scale spectral data in-place"""
         self._y_data *= other
         return self
 
-    def __mul__(self: Self, other: Real) -> Self:
+    def __mul__(self, other: Real) -> Self:
         """Get a new spectrum with scaled data"""
         new_spec = self.copy()
         new_spec *= other
         return new_spec
 
     @abstractmethod
-    def copy(self: Self) -> Self:
+    def copy(self) -> Self:
         """Get an independent copy of spectrum"""
 
     @property
-    def x_tick_labels(self) -> XTickLabels:
+    def x_tick_labels(self) -> XTickLabels | None:
         """x-axis tick labels (e.g. high-symmetry point locations)"""
         return self._x_tick_labels
 
     @x_tick_labels.setter
-    def x_tick_labels(self, value: XTickLabels) -> None:
+    def x_tick_labels(self,
+                      value: XTickLabels | Sequence[tuple[int, str]] | None,
+                      ) -> None:
         err_msg = (
             'x_tick_labels should be of type Sequence[tuple[int, str]] e.g. '
             '[(0, "label1"), (5, "label2")]'
@@ -522,6 +546,7 @@ class Spectrum1D(Spectrum):
 
           - 'label' : str. This is used label lines on a 1D plot
     """
+    @override
     def __init__(self, x_data: Quantity, y_data: Quantity,
                  x_tick_labels: XTickLabels | None = None,
                  metadata: dict[str, int | str | list[str]] | None = None,
@@ -559,7 +584,7 @@ class Spectrum1D(Spectrum):
         self.x_tick_labels = x_tick_labels
         self.metadata = {} if metadata is None else metadata
 
-    def __add__(self, other: 'Spectrum1D') -> 'Spectrum1D':
+    def __add__(self, other: Spectrum1D) -> Spectrum1D:
         """
         Sums the y_data of two Spectrum1D objects together,
         their x_data axes must be equal, and their y_data must
@@ -569,8 +594,10 @@ class Spectrum1D(Spectrum):
         Any metadata key/value pairs that are common to both
         spectra are retained, any others are discarded
         """
-        # pylint: disable=import-outside-toplevel
-        from .collections import Spectrum1DCollection
+        from euphonic.spectra.collections import (  # noqa: PLC0415
+            Spectrum1DCollection,
+        )
+
         spec_col = Spectrum1DCollection.from_spectra([self, other])
         return spec_col.sum()
 
@@ -813,6 +840,8 @@ class Spectrum2D(Spectrum):
         spectrum. Keys should be strings and values should be strings
         or integers
     """
+    _internal_z_data_unit: str
+
     def __init__(self, x_data: Quantity, y_data: Quantity,
                  z_data: Quantity,
                  x_tick_labels: XTickLabels | None = None,
@@ -900,7 +929,7 @@ class Spectrum2D(Spectrum):
                 width_convention: Literal['fwhm', 'std'] = 'fwhm',
                 width_interpolation_error: float = 0.01,
                 width_fit: ErrorFit = 'cheby-log',
-                ) -> Self:
+                ) -> Spectrum2D:
         """
         Broaden z_data and return a new broadened Spectrum2D object
 
@@ -973,7 +1002,7 @@ class Spectrum2D(Spectrum):
 
         if any(widths_in_bin_units):
             bin_centres = [self.get_bin_centres(ax).magnitude
-                           for ax in ['x', 'y']]
+                           for ax in 'xy']
 
             z_broadened = self._broaden_data(
                 self.z_data.magnitude,
@@ -1009,15 +1038,15 @@ class Spectrum2D(Spectrum):
 
     @staticmethod
     def _broaden_spectrum2d_with_function(
-            spectrum: 'Spectrum2D',
+            spectrum: Spectrum2D,
             width_function: Callable[[Quantity], Quantity],
             axis: Literal['x', 'y'] = 'y',
-            width_lower_limit: Quantity = None,
+            width_lower_limit: Quantity | None = None,
             width_convention: Literal['fwhm', 'std'] = 'fwhm',
             width_interpolation_error: float = 1e-2,
             shape: KernelShape = 'gauss',
             width_fit: ErrorFit = 'cheby-log',
-    ) -> 'Spectrum2D':
+    ) -> Spectrum2D:
         """
         Apply value-dependent Gaussian broadening to one axis of Spectrum2D
         """
@@ -1094,9 +1123,8 @@ class Spectrum2D(Spectrum):
             be desirable for plotting.  Otherwise, the outer bin edges will
             extend from the initial data range.
         """
-        enum = {'x': 0, 'y': 1}
         bin_data = getattr(self, f'{bin_ax}_data')
-        data_ax_len = self.z_data.shape[enum[bin_ax]]
+        data_ax_len = self.z_data.shape[Axes[bin_ax]]
         if self._is_bin_edge(data_ax_len, bin_data.shape[0]):
             return bin_data
         return self._bin_centres_to_edges(
@@ -1117,9 +1145,8 @@ class Spectrum2D(Spectrum):
         bin_ax
             The axis to get the bin centres for, 'x' or 'y'
         """
-        enum = {'x': 0, 'y': 1}
         bin_data = getattr(self, f'{bin_ax}_data')
-        data_ax_len = self.z_data.shape[enum[bin_ax]]
+        data_ax_len = self.z_data.shape[Axes[bin_ax]]
         if self._is_bin_edge(data_ax_len, bin_data.shape[0]):
             return self._bin_edges_to_centres(bin_data)
         return bin_data
