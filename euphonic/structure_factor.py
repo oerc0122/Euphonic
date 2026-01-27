@@ -1,12 +1,14 @@
-from typing import Any, NoReturn, TypeVar
+from typing import Any, NoReturn, TypedDict
 import warnings
 
 import numpy as np
+from typing_extensions import NotRequired, Self
 
-from euphonic.crystal import Crystal
+from euphonic.crystal import Crystal, CrystalDict
 from euphonic.io import _obj_to_dict, _process_dict
 from euphonic.qpoint_frequencies import QpointFrequencies
 from euphonic.spectra import Spectrum1D, Spectrum2D
+from euphonic.types import FloatArray
 from euphonic.ureg import Quantity, ureg
 from euphonic.util import dedent_and_fill
 from euphonic.validate import _check_constructor_inputs, _check_unit_conversion
@@ -14,6 +16,17 @@ from euphonic.validate import _check_constructor_inputs, _check_unit_conversion
 
 class NoTemperatureError(Exception):
     pass
+
+class StructureFactorDict(TypedDict):
+    crystal: CrystalDict
+    qpts: FloatArray
+    frequencies: FloatArray
+    frequencies_unit: str
+    structure_factors: FloatArray
+    structure_factors_unit: str
+
+    weights: NotRequired[FloatArray]
+
 
 
 class StructureFactor(QpointFrequencies):
@@ -42,11 +55,9 @@ class StructureFactor(QpointFrequencies):
         population factor). None if no temperature-dependent effects
         have been applied
     """
-    T = TypeVar('T', bound='StructureFactor')
-
-    def __init__(self, crystal: Crystal, qpts: np.ndarray,
+    def __init__(self, crystal: Crystal, qpts: FloatArray,
                  frequencies: Quantity, structure_factors: Quantity,
-                 weights: np.ndarray | None = None,
+                 weights: FloatArray | None = None,
                  temperature: Quantity | None = None) -> None:
         """
         Parameters
@@ -124,7 +135,7 @@ class StructureFactor(QpointFrequencies):
                              e_bins: Quantity,
                              calc_bose: bool = True,
                              temperature: Quantity | None = None,
-                             weights: np.ndarray | None = None,
+                             weights: FloatArray | None = None,
                              ) -> Spectrum1D:
         """Bin structure factor in energy, flattening q to produce 1D spectrum
 
@@ -292,7 +303,7 @@ class StructureFactor(QpointFrequencies):
         return sqw_map*sf_conv/e_conv
 
     def _bose_factor(self, temperature: Quantity | None = None,
-                     ) -> np.ndarray:
+                     ) -> FloatArray:
         """
         Calculate the Bose factor for the frequencies stored in
         StructureFactor
@@ -342,7 +353,7 @@ class StructureFactor(QpointFrequencies):
             bose[:] = 0
         return bose
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> StructureFactorDict:
         """
         Convert to a dictionary. See StructureFactor.from_dict for
         details on keys/values
@@ -359,7 +370,7 @@ class StructureFactor(QpointFrequencies):
             self.crystal, self.qpts, self.frequencies, self.weights)
 
     @classmethod
-    def from_dict(cls: type[T], d: dict[str, Any]) -> T:
+    def from_dict(cls, d: StructureFactorDict) -> Self:
         """
         Convert a dictionary to a StructureFactor object
 

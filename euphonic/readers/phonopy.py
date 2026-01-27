@@ -1,17 +1,20 @@
 from contextlib import suppress
 from pathlib import Path
 import re
-from typing import Any, NamedTuple, TextIO, TypedDict, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, TextIO, TypedDict
 import warnings
 
 import numpy as np
 import numpy.typing as npt
 from typing_extensions import NotRequired
 
+from euphonic.force_constants import ForceConstantsDict
+from euphonic.qpoint_phonon_modes import PhononModeDict
+from euphonic.types import ComplexArray, FloatArray, IntArray, StrArray
 from euphonic.ureg import ureg
 from euphonic.util import convert_fc_phases, dedent_and_fill
 
-_have_h5py: Exception | None
+_have_h_have_h5py: Exception | None
 _have_yaml: Exception | None
 
 try:
@@ -33,11 +36,7 @@ except ModuleNotFoundError as e:
 HDF5_EXTS = {'hdf5', 'hd5', 'h5'}
 YAML_EXTS = {'yaml', 'yml', 'yl'}
 
-FloatArray = npt.NDArray[np.floating]
-IntArray = npt.NDArray[np.integer]
-StrArray = npt.NDArray[np.str_]
-
-class PhononDict(TypedDict):
+class _PartialPhononDict(TypedDict):
     qpts: FloatArray
     frequencies: FloatArray
     eigenvectors: NotRequired[FloatArray]
@@ -49,7 +48,7 @@ class PhononDict(TypedDict):
     atom_mass: NotRequired[FloatArray]
 
 
-class SummaryDict(TypedDict):
+class _SummaryDict(TypedDict):
     n_atoms : int
     cell_vectors: FloatArray
     atom_r: FloatArray
@@ -70,49 +69,18 @@ class SummaryDict(TypedDict):
     born: NotRequired[FloatArray]
     dielectric: NotRequired[FloatArray]
 
-class CrystalDict(TypedDict):
-    n_atoms: int
-    cell_vectors: FloatArray
-    cell_vectors_unit: str
-    atom_r: FloatArray
-    atom_type: StrArray
-    atom_mass: FloatArray
-    atom_mass_unit: str
-
-class BornDict(TypedDict):
-    nac_factor: float
+class _BornDict(TypedDict):
     dielectric: FloatArray
     born: FloatArray
+    nac_factor: NotRequired[float]
 
-
-class FullPhononDict(TypedDict):
-    crystal: CrystalDict
-    n_qpts: int
-    qpts: FloatArray
-    frequencies: FloatArray
-    frequencies_unit: str
-    eigenvectors: NotRequired[FloatArray]
-    weights: NotRequired[FloatArray]
-
-class InterpDict(TypedDict):
-    crystal: CrystalDict
-    force_constants: FloatArray
-    force_constants_unit: str
-    sc_matrix: IntArray
-    cell_origins: IntArray
-
-    born: NotRequired[FloatArray]
-    born_unit: NotRequired[str]
-    dielectric: NotRequired[FloatArray]
-    dielectric_unit: NotRequired[str]
-
-class CrystalData(NamedTuple):
+class _CrystalData(NamedTuple):
     cell_vectors: FloatArray
     n_atoms: int
     atom_r: FloatArray
     atom_mass: FloatArray
     atom_type: StrArray
-    idx_in_pcell: npt.NDArray[np.int32]
+    idx_in_pcell: IntArray
 
 
 # h5py can't be called from Matlab, so import as late as possible to
@@ -150,7 +118,7 @@ def _convert_weights(weights: FloatArray) -> FloatArray:
 
 def _extract_phonon_data_yaml(filename: Path,
                               read_eigenvectors: bool = True,
-                              ) -> PhononDict:
+                              ) -> _PartialPhononDict:
     """
     From a mesh/band/qpoint.yaml file, extract the relevant information
     as a dict of Numpy arrays. No unit conversion is done at this point,
@@ -183,7 +151,7 @@ def _extract_phonon_data_yaml(filename: Path,
     phonons = list(phonon_data['phonon'])
     bands_data_each_qpt = [bands_data['band'] for bands_data in phonons]
 
-    data_dict: PhononDict = {
+    data_dict: _PartialPhononDict = {
         'qpts': np.array([phon['q-position'] for phon in phonons]),
         'frequencies': np.array(
             [[band_data['frequency'] for band_data in bands_data]
@@ -216,7 +184,7 @@ def _extract_phonon_data_yaml(filename: Path,
 
 def _extract_phonon_data_hdf5(filename: Path,
                               read_eigenvectors: bool = True,
-                              ) -> PhononDict:
+                              ) -> _PartialPhononDict:
     """
     From a mesh/band/qpoint.hdf5 file, extract the relevant information
     as a dict of Numpy arrays. No unit conversion is done at this point,
@@ -242,7 +210,7 @@ def _extract_phonon_data_hdf5(filename: Path,
     if isinstance(_have_h5py, Exception):
         raise ImportPhonopyReaderError from _have_h5py
 
-    data_dict: PhononDict
+    data_dict: _PartialPhononDict
     with h5py.File(filename, 'r') as hdf5_file:
         if 'qpoint' in hdf5_file:
             data_dict = {
@@ -289,7 +257,7 @@ def read_phonon_data(
         atom_mass_unit: str = 'amu',
         frequencies_unit: str = 'meV',
         read_eigenvectors: bool = True,
-        ) -> FullPhononDict:
+        ) -> PhononModeDict:
     """
     Reads precalculated phonon mode data from a Phonopy
     mesh/band/qpoints.yaml/hdf5 file and returns it in a dictionary.
@@ -388,7 +356,7 @@ def read_phonon_data(
             raise ValueError(msg)
 
     n_qpts = len(phonon_dict['qpts'])
-    data_dict: FullPhononDict = {
+    data_dict: PhononModeDict = {
         'n_qpts': n_qpts,
         'qpts': phonon_dict['qpts'],
         'frequencies': phonon_dict['frequencies']*ureg(
@@ -414,7 +382,7 @@ def read_phonon_data(
     return data_dict
 
 
-def convert_eigenvector_phases(phonon_dict: PhononDict) -> FloatArray:
+def convert_eigenvector_phases(phonon_dict: _PartialPhononDict) -> ComplexArray:
     """
     When interpolating the force constants matrix, Euphonic uses a phase
     convention of e^iq.r_a, where r_a is the coordinate of each CELL in
@@ -504,7 +472,7 @@ def _check_fc_shape(fc_shape: tuple[int, int], n_atoms: int,
         raise ValueError(msg)
 
 
-def _extract_born(born_file_obj: TextIO) -> BornDict:
+def _extract_born(born_file_obj: TextIO) -> _BornDict:
     """
     Parse and convert dielectric tensor and born effective
     charge from BORN file
@@ -528,27 +496,29 @@ def _extract_born(born_file_obj: TextIO) -> BornDict:
         else:
             born_lines.append([float(x) for x in line.split()])
 
-    born_dict = {}
 
     idx0 = 0
     if len(born_lines[0]) == 1:
         # Then this is the NAC conversion factor
-        born_dict['nac_factor'] = born_lines[0][0]
+        nac_factor = born_lines[0][0]
         idx0 = 1
 
-    # dielectric first line after factor
-    # xx, xy, xz, yx, yy, yz, zx, zy, zz.
-    born_dict['dielectric'] = np.array(born_lines[idx0]).reshape([3,3])
+    born_dict: _BornDict = {
+        # dielectric first line after factor
+        # xx, xy, xz, yx, yy, yz, zx, zy, zz.
+        'dielectric': np.array(born_lines[idx0]).reshape([3,3]),
+        # born charges after dielectric
+        # xx, xy, xz, yx, yy, yz, zx, zy, zz.
+        'born': np.array(
+        [np.array(bl).reshape([3,3]) for bl in born_lines[idx0+1:]]),
+    }
+    if idx0 == 1:
+        born_dict['nac_factor'] = nac_factor
 
-    # born charges after dielectric
-    # xx, xy, xz, yx, yy, yz, zx, zy, zz.
-    born_dict['born'] = np.array(
-        [np.array(bl).reshape([3,3]) for bl in born_lines[idx0+1:]])
-
-    return cast('BornDict', born_dict)
+    return born_dict
 
 
-def _extract_summary(filename: Path, fc_extract: bool = False) -> SummaryDict:
+def _extract_summary(filename: Path, fc_extract: bool = False) -> _SummaryDict:
     """
     Read phonopy.yaml for summary data produced during the Phonopy
     post-process
@@ -672,7 +642,7 @@ def _extract_summary(filename: Path, fc_extract: bool = False) -> SummaryDict:
     return summary_dict
 
 
-def _extract_crystal_data(crystal: dict[str, Any]) -> CrystalData:
+def _extract_crystal_data(crystal: dict[str, Any]) -> _CrystalData:
     """
     Gets relevant data from a section of phonopy.yaml
 
@@ -720,7 +690,7 @@ def _extract_crystal_data(crystal: dict[str, Any]) -> CrystalData:
         # If reduced_to isn't present it is already the primitive cell
         idx_in_pcell = np.arange(n_atoms, dtype=np.int32)
 
-    return CrystalData(cell_vectors, n_atoms, atom_r,
+    return _CrystalData(cell_vectors, n_atoms, atom_r,
                        atom_mass, atom_type, idx_in_pcell)
 
 
@@ -734,7 +704,7 @@ def read_interpolation_data(
         atom_mass_unit: str = 'amu',
         force_constants_unit: str = 'hartree/bohr**2',
         born_unit: str = 'e',
-        dielectric_unit: str = '(e**2)/(bohr*hartree)') -> InterpDict:
+        dielectric_unit: str = '(e**2)/(bohr*hartree)') -> ForceConstantsDict:
     """
     Reads data from the phonopy summary file (default phonopy.yaml) and
     optionally born and force constants files. Only attempts to read
@@ -855,7 +825,7 @@ def read_interpolation_data(
          summary_dict['sc_atom_r'], summary_dict['pc_to_sc_atom_idx'],
          summary_dict['sc_to_pc_atom_idx'], summary_dict['sc_matrix'])
 
-    data_dict: InterpDict = {
+    data_dict: ForceConstantsDict = {
         'crystal': {
             'n_atoms': len(summary_dict['atom_r']),
             'cell_vectors': summary_dict['cell_vectors']*ureg(

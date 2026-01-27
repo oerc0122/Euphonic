@@ -1,11 +1,12 @@
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal, TypedDict
 import warnings
 
 import numpy as np
+from typing_extensions import Self, NotRequired
 
 from euphonic.broadening import ErrorFit, _width_interpolated_broadening
-from euphonic.crystal import Crystal
+from euphonic.crystal import Crystal, CrystalDict
 from euphonic.io import (
     _obj_from_json_file,
     _obj_to_dict,
@@ -17,9 +18,17 @@ from euphonic.spectra import Spectrum1D, Spectrum1DCollection, Spectrum2D
 from euphonic.ureg import Quantity, ureg
 from euphonic.util import _calc_abscissa, get_qpoint_labels
 from euphonic.validate import _check_constructor_inputs, _check_unit_conversion
+from euphonic.types import FloatArray
 
 AdaptiveMethod = Literal['reference', 'fast']
 
+
+class QpointFrequenciesDict(TypedDict):
+    crystal: CrystalDict
+    qpts: FloatArray
+    frequencies: FloatArray
+    frequencies_unit: str
+    weights: NotRequired[FloatArray]
 
 class QpointFrequencies:
     """
@@ -40,11 +49,10 @@ class QpointFrequencies:
     weights
         Shape (n_qpts,) float ndarray. The weight for each q-point
     """
-    T = TypeVar('T', bound='QpointFrequencies')
 
-    def __init__(self, crystal: Crystal, qpts: np.ndarray,
+    def __init__(self, crystal: Crystal, qpts: FloatArray,
                  frequencies: Quantity,
-                 weights: np.ndarray | None = None) -> None:
+                 weights: FloatArray | None = None) -> None:
         """
         Parameters
         ----------
@@ -167,7 +175,7 @@ class QpointFrequencies:
         dos_bins: Quantity,
         mode_widths: Quantity | None = None,
         mode_widths_min: Quantity = Quantity(0.01, 'meV'),
-        mode_weights: np.ndarray | None = None,
+        mode_weights: FloatArray | None = None,
         adaptive_method: AdaptiveMethod = 'reference',
         adaptive_error: float = 0.01,
         adaptive_error_fit: ErrorFit = 'cubic',
@@ -335,7 +343,7 @@ class QpointFrequencies:
             self.qpts, cell=self.crystal.to_spglib_cell())
         return abscissa, x_tick_labels
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> QpointFrequenciesDict:
         """
         Convert to a dictionary. See QpointFrequencies.from_dict for
         details on keys/values
@@ -356,7 +364,7 @@ class QpointFrequencies:
         _obj_to_json_file(self, filename)
 
     @classmethod
-    def from_dict(cls: type[T], d: dict[str, Any]) -> T:
+    def from_dict(cls, d: QpointFrequenciesDict) -> Self:
         """
         Convert a dictionary to a QpointFrequencies object
 
@@ -380,7 +388,7 @@ class QpointFrequencies:
                    d['weights'])
 
     @classmethod
-    def from_json_file(cls: type[T], filename: Path | str) -> T:
+    def from_json_file(cls, filename: Path | str) -> Self:
         """
         Read from a JSON file. See from_dict for
         required fields
@@ -393,9 +401,9 @@ class QpointFrequencies:
         return _obj_from_json_file(cls, filename)
 
     @classmethod
-    def from_castep(cls: type[T], filename: Path | str,
+    def from_castep(cls, filename: Path | str,
                     average_repeat_points: bool = True,
-                    prefer_non_loto: bool = False) -> T:
+                    prefer_non_loto: bool = False) -> Self:
         """
         Reads precalculated phonon mode data from a CASTEP .phonon file
 
@@ -423,10 +431,10 @@ class QpointFrequencies:
         return cls.from_dict(data)
 
     @classmethod
-    def from_phonopy(cls: type[T], path: Path | str = '.',
+    def from_phonopy(cls, path: Path | str = '.',
                      phonon_name: Path | str = 'band.yaml',
                      phonon_format: str | None = None,
-                     summary_name: Path | str = 'phonopy.yaml') -> T:
+                     summary_name: Path | str = 'phonopy.yaml') -> Self:
         """
         Reads precalculated phonon mode data from a Phonopy
         mesh/band/qpoints.yaml/hdf5 file. May also read from

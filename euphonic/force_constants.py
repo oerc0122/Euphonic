@@ -8,17 +8,17 @@ from typing import (
     Any,
     Literal,
     TypedDict,
+    overload,
 )
 import warnings
 
 import numpy as np
-import numpy.typing as npt
 from pint import Quantity
 from scipy.special import erfc
 from threadpoolctl import threadpool_info, threadpool_limits
-from typing_extensions import Self
+from typing_extensions import NotRequired, Self
 
-from euphonic.crystal import Crystal
+from euphonic.crystal import Crystal, CrystalDict
 from euphonic.io import (
     _obj_from_json_file,
     _obj_to_dict,
@@ -28,6 +28,7 @@ from euphonic.io import (
 from euphonic.qpoint_frequencies import QpointFrequencies
 from euphonic.qpoint_phonon_modes import QpointPhononModes
 from euphonic.readers import castep, phonopy
+from euphonic.types import ComplexArray, FloatArray, IntArray
 from euphonic.ureg import ureg
 from euphonic.util import (
     _get_supercell_relative_idx,
@@ -50,13 +51,28 @@ class ImportCError(Exception):
 
 DipoleData = TypedDict('DipoleData',  # Functional syntax due to lambda
                        {'dipole_parameter': float,
-                        'H_ab': npt.NDArray[np.float64],
-                        'cells': npt.NDArray[np.float64],
-                        'gvecs_cart': npt.NDArray[np.float64],
-                        'gvec_phases': npt.NDArray[np.float64],
-                        'dipole_q0': npt.NDArray[np.float64],
+                        'H_ab': FloatArray,
+                        'cells': FloatArray,
+                        'gvecs_cart': FloatArray,
+                        'gvec_phases': FloatArray,
+                        'dipole_q0': FloatArray,
                         'lambda': float,
                         })
+
+
+class ForceConstantsDict(TypedDict):
+    """Parameters necessary for creating a :class:`ForceConstants`."""
+    crystal: CrystalDict
+    force_constants: FloatArray
+    force_constants_unit: str
+    sc_matrix: IntArray
+    cell_origins: IntArray
+
+    born: NotRequired[FloatArray]
+    born_unit: NotRequired[str]
+    dielectric: NotRequired[FloatArray]
+    dielectric_unit: NotRequired[str]
+
 
 class ForceConstants:
     """
@@ -90,7 +106,8 @@ class ForceConstants:
     """
 
     def __init__(self, crystal: Crystal, force_constants: Quantity,
-                 sc_matrix: np.ndarray, cell_origins: np.ndarray,
+                 sc_matrix: IntArray,
+                 cell_origins: IntArray,
                  born: Quantity | None = None,
                  dielectric: Quantity | None = None) -> None:
         """
@@ -189,10 +206,20 @@ class ForceConstants:
                                 'dielectric_unit'])
         super().__setattr__(name, value)
 
+    @overload
+    def calculate_qpoint_phonon_modes(
+        *args, return_mode_gradients: Literal[True], **kwargs,
+    ) -> tuple[QpointPhononModes, Quantity | None]: ...
+
+    @overload
+    def calculate_qpoint_phonon_modes(
+        *args, return_mode_gradients: Literal[False] = False, **kwargs,
+    ) -> QpointPhononModes: ...
+
     def calculate_qpoint_phonon_modes(
             self,
-            qpts: np.ndarray,
-            weights: np.ndarray | None = None,
+            qpts: FloatArray,
+            weights: FloatArray | None = None,
             asr: Literal['realspace', 'reciprocal'] | None = None,
             dipole: bool = True,
             dipole_parameter: float = 1.0,
@@ -419,10 +446,20 @@ class ForceConstants:
             return qpt_ph_modes, grads
         return qpt_ph_modes
 
+    @overload
+    def calculate_qpoint_frequencies(
+        *args, return_mode_gradients: Literal[True], **kwargs,
+    ) -> tuple[QpointFrequencies, Quantity | None]: ...
+
+    @overload
+    def calculate_qpoint_frequencies(
+        *args, return_mode_gradients: Literal[False] = False, **kwargs,
+    ) -> QpointFrequencies: ...
+
     def calculate_qpoint_frequencies(
             self,
-            qpts: np.ndarray,
-            weights: np.ndarray | None = None,
+            qpts: FloatArray,
+            weights: FloatArray | None = None,
             asr: Literal['realspace', 'reciprocal'] | None = None,
             dipole: bool = True,
             dipole_parameter: float = 1.0,
@@ -448,10 +485,39 @@ class ForceConstants:
             return qpt_freqs, grads
         return qpt_freqs
 
+    @overload
+    def _calculate_phonons_at_qpts(
+        *args,
+        return_mode_gradients: Literal[True],
+        return_eigenvectors: Literal[True],
+        **kwargs,
+    ) -> tuple[
+        FloatArray, Quantity, FloatArray | None, ComplexArray, Quantity]: ...
+
+    @overload
+    def _calculate_phonons_at_qpts(
+        *args,
+        return_eigenvectors: Literal[True],
+        **kwargs,
+    ) -> tuple[
+        FloatArray, Quantity, FloatArray | None, ComplexArray, None]: ...
+
+    @overload
+    def _calculate_phonons_at_qpts(
+        *args,
+        return_mode_gradients: Literal[True],
+        **kwargs,
+    ) -> tuple[
+        FloatArray, Quantity, FloatArray | None, None, Quantity]: ...
+
+    @overload
+    def _calculate_phonons_at_qpts(*args, **kwargs) -> tuple[
+        FloatArray, Quantity, FloatArray | None, None, None]: ...
+
     def _calculate_phonons_at_qpts(
             self,
-            qpts: np.ndarray,
-            weights: np.ndarray | None,
+            qpts: FloatArray,
+            weights: FloatArray | None,
             asr: Literal['realspace', 'reciprocal'] | None,
             dipole: bool,
             dipole_parameter: float,
@@ -462,8 +528,8 @@ class ForceConstants:
             n_threads: int | None,
             return_mode_gradients: bool,
             return_eigenvectors: bool) -> tuple[
-                np.ndarray, Quantity, np.ndarray | None,
-                np.ndarray | None, Quantity | None]:
+                FloatArray, Quantity, FloatArray | None,
+                ComplexArray | None, Quantity | None]:
         """
         Calculates phonon frequencies, and optionally eigenvectors and
         phonon frequency gradients. See calculate_qpoint_phonon_modes
@@ -772,18 +838,18 @@ casting to real mode gradients.
 
     def _calculate_phonons_at_q(
             self,
-            qpt: np.ndarray,
-            fc_img_weighted: np.ndarray,
+            qpt: FloatArray,
+            fc_img_weighted: FloatArray,
             unique_sc_origins: Sequence[Sequence[int]],
-            unique_sc_i: np.ndarray,
+            unique_sc_i: IntArray,
             unique_cell_origins: Sequence[Sequence[int]],
-            unique_cell_i: np.ndarray,
-            all_origins_cart: np.ndarray,
-            dyn_mat_weighting: np.ndarray,
-            recip_asr_correction: np.ndarray,
+            unique_cell_i: IntArray,
+            all_origins_cart: FloatArray,
+            dyn_mat_weighting: FloatArray,
+            recip_asr_correction: ComplexArray,
             dipole: bool,
-            q_dir: np.ndarray | None = None,
-            ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+            q_dir: FloatArray | None = None,
+            ) -> tuple[FloatArray, ComplexArray, ComplexArray | None]:
         """
         Given a q-point and some precalculated q-independent values,
         calculate and diagonalise the dynamical matrix and return the
@@ -891,14 +957,14 @@ casting to real mode gradients.
 
     def _calculate_dyn_mat(
             self,
-            qpt: np.ndarray,
-            fc_img_weighted: np.ndarray,
+            qpt: FloatArray,
+            fc_img_weighted: FloatArray,
             unique_sc_origins: Sequence[Sequence[int]],
-            unique_sc_i: np.ndarray,
+            unique_sc_i: IntArray,
             unique_cell_origins: Sequence[Sequence[int]],
-            unique_cell_i: np.ndarray,
-            all_origins_cart: np.ndarray) -> tuple[np.ndarray,
-                                                   np.ndarray | None]:
+            unique_cell_i: IntArray,
+            all_origins_cart: FloatArray) -> tuple[ComplexArray,
+                                                   ComplexArray | None]:
         """
         Calculate the non mass weighted dynamical matrix at a specified
         q-point from the image weighted force constants matrix and the
@@ -987,8 +1053,8 @@ casting to real mode gradients.
 
     @staticmethod
     def _dipole_correction_init(crystal: Crystal,
-                                born: np.ndarray,
-                                dielectric: np.ndarray,
+                                born: Quantity,
+                                dielectric: Quantity,
                                 dipole_parameter: float = 1.0,
                                 ) -> DipoleData:
         """
@@ -1172,8 +1238,8 @@ casting to real mode gradients.
 
     @staticmethod
     def _calculate_dipole_correction(
-            q: np.ndarray, crystal: Crystal, born: np.ndarray,
-            dielectric: np.ndarray,
+            q: FloatArray, crystal: Crystal, born: FloatArray,
+            dielectric: FloatArray,
             dipole_init_data: DipoleData,
             ) -> np.ndarray:
         """
@@ -1270,8 +1336,8 @@ casting to real mode gradients.
         return np.reshape(np.transpose(dipole, axes=[0, 2, 1, 3]),
                           (3*n_atoms, 3*n_atoms))
 
-    def _get_q_dirs(self, qpts: np.ndarray, qpts_i: np.ndarray,
-                   gamma_idx: np.ndarray) -> np.ndarray:
+    def _get_q_dirs(self, qpts: FloatArray, qpts_i: IntArray,
+                    gamma_idx: IntArray) -> FloatArray:
         """
         Get q-directions at gamma points
 
@@ -1312,7 +1378,7 @@ casting to real mode gradients.
                         q_dirs[i] = qpts[idx_in_qpts] - qpts[idx_in_qpts - 1]
         return q_dirs
 
-    def _calculate_gamma_correction(self, q_dir: np.ndarray) -> np.ndarray:
+    def _calculate_gamma_correction(self, q_dir: FloatArray) -> ComplexArray:
         """
         Calculate non-analytic correction to the dynamical matrix at q=0
         for a specified direction of approach. See Eq. 60 of X. Gonze
@@ -1355,7 +1421,7 @@ casting to real mode gradients.
         return na_corr
 
     @staticmethod
-    def _get_shell_origins(n: int) -> np.ndarray:
+    def _get_shell_origins(n: int) -> IntArray:
         """
         Given the shell number, compute all the cell origins that lie in
         that shell
@@ -1399,7 +1465,7 @@ casting to real mode gradients.
 
         return origins
 
-    def _enforce_realspace_asr(self) -> np.ndarray:
+    def _enforce_realspace_asr(self) -> FloatArray:
         """
         Apply a transformation to the force constants matrix so that it
         satisfies the acousic sum rule. Diagonalise, shift the acoustic
@@ -1448,8 +1514,8 @@ casting to real mode gradients.
                         (n_cells_in_sc, 3*n_atoms, 3*n_atoms))
 
 
-    def _enforce_reciprocal_asr(self, dyn_mat_gamma: np.ndarray,
-            ) -> np.ndarray:
+    def _enforce_reciprocal_asr(self, dyn_mat_gamma: ComplexArray,
+            ) -> ComplexArray:
         """
         Calculate the correction to the dynamical matrix that would have
         to be applied to satisfy the acousic sum rule. Diagonalise the
@@ -1491,8 +1557,8 @@ casting to real mode gradients.
 
         return recip_asr_correction
 
-    def _find_acoustic_modes(self, dyn_mat: np.ndarray,
-            ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _find_acoustic_modes(self, dyn_mat: ComplexArray,
+            ) -> tuple[IntArray, FloatArray, ComplexArray]:
         """
         Find the acoustic modes from a dynamical matrix, they should
         have the sum of c of m amplitude squared = mass (note: have not
@@ -1537,11 +1603,11 @@ casting to real mode gradients.
 
     def _calculate_phases(
             self,
-            qpt: np.ndarray,
+            qpt: FloatArray,
             unique_sc_origins: Sequence[Sequence[int]],
-            unique_sc_i: np.ndarray,
+            unique_sc_i: IntArray,
             unique_cell_origins: Sequence[Sequence[int]],
-            unique_cell_i: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+            unique_cell_i: IntArray) -> tuple[FloatArray, FloatArray]:
         """
         Calculate the phase factors for the supercell images and cells
         for a single q-point. The unique supercell and cell origins
@@ -1697,7 +1763,7 @@ casting to real mode gradients.
         # nonexistent images
         self._sc_image_i = sc_image_i[:, :, :, :np.max(n_sc_images)]
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> ForceConstantsDict:
         """
         Convert to a dictionary. See ForceConstants.from_dict for
         details on keys/values
@@ -1724,7 +1790,7 @@ casting to real mode gradients.
         _obj_to_json_file(self, filename)
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> Self:
+    def from_dict(cls, d: ForceConstantsDict) -> Self:
         """
         Convert a dictionary to a ForceConstants object
 
@@ -1762,7 +1828,7 @@ casting to real mode gradients.
     @classmethod
     def from_total_fc_with_dipole(
             cls, crystal: Crystal, force_constants: Quantity,
-            sc_matrix: np.ndarray, cell_origins: np.ndarray, born: Quantity,
+            sc_matrix: IntArray, cell_origins: IntArray, born: Quantity,
             dielectric: Quantity | None) -> Self:
         """
         Subtracts a dipole term from the input force constants matrix

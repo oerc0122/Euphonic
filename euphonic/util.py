@@ -501,7 +501,7 @@ def _cell_vectors_to_volume(cell_vectors: Quantity) -> Quantity:
 
 def _get_unique_elems_and_idx(
         all_elems: Sequence[tuple[int | str, ...]],
-        ) -> dict[tuple[int | str, ...], npt.NDArray[np.integer]]:
+        ) -> dict[tuple[int | str, ...], IntArray]:
     """
     Returns an ordered dictionary mapping the unique sequences of
     elements to their indices

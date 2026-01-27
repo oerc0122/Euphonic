@@ -3,11 +3,7 @@ from argparse import ArgumentParser
 import matplotlib.style
 
 from euphonic import ForceConstants, QpointPhononModes, Spectrum1D
-from euphonic.plot import plot_1d
-from euphonic.styles import base_style
-from euphonic.writers.phonon_website import write_phonon_website_json
-
-from .utils import (
+from euphonic.cli.utils import (
     _bands_from_force_constants,
     _calc_modes_kwargs,
     _compose_style,
@@ -19,6 +15,9 @@ from .utils import (
     load_data_from_file,
     matplotlib_save_or_show,
 )
+from euphonic.plot import plot_1d
+from euphonic.styles import base_style
+from euphonic.writers.phonon_website import write_phonon_website_json
 
 
 def main(params: list[str] | None = None) -> None:
@@ -48,6 +47,7 @@ def main(params: list[str] | None = None) -> None:
         x_tick_labels = None
 
     if args.save_web_json is not None:
+        assert isinstance(bands, QpointPhononModes)
         write_phonon_website_json(modes=bands,
                                   name=_get_title(args.filename, args.title),
                                   output_file=args.save_web_json,
@@ -57,6 +57,7 @@ def main(params: list[str] | None = None) -> None:
 
     print('Mapping modes to 1D band-structure')
     if args.reorder:
+        assert isinstance(bands, QpointPhononModes)
         bands.reorder_frequencies()
 
     spectrum = bands.get_dispersion()

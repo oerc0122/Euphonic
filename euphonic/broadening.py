@@ -14,6 +14,7 @@ from scipy.stats import norm
 
 from euphonic.ureg import ureg
 from euphonic.util import dedent_and_fill
+from euphonic.types import FloatArray
 
 ErrorFit = Literal['cheby-log', 'cubic']
 KernelShape = Literal['gauss', 'lorentz']
@@ -28,8 +29,8 @@ def variable_width_broadening(
     bins: Quantity,
     x: Quantity,
     width_function: Callable[[Quantity], Quantity],
-    weights: np.ndarray | Quantity,
-    width_lower_limit: Quantity = None,
+    weights: FloatArray | Quantity,
+    width_lower_limit: Quantity | None = None,
     width_convention: Literal['fwhm', 'std'] = 'fwhm',
     adaptive_error: float = 1e-2,
     shape: KernelShape = 'gauss',
@@ -114,8 +115,8 @@ def variable_width_broadening(
 def width_interpolated_broadening(
     bins: Quantity,
     x: Quantity,
-    widths: Quantity,
-    weights: np.ndarray,
+    widths: FloatArray | Quantity,
+    weights: FloatArray,
     adaptive_error: float,
     shape: KernelShape = 'gauss',
     fit: ErrorFit = 'cheby-log',
@@ -168,7 +169,7 @@ def width_interpolated_broadening(
                                           fit=fit) / bins.units
 
 
-def _lorentzian(x: np.ndarray, gamma: np.ndarray) -> np.ndarray:
+def _lorentzian(x: FloatArray, gamma: FloatArray) -> FloatArray:
     return gamma / (2 * np.pi * (x**2 + (gamma / 2)**2))
 
 
@@ -218,13 +219,13 @@ def _get_spacing(error,
 
 
 def _width_interpolated_broadening(
-    bins: np.ndarray,
-    x: np.ndarray,
-    widths: np.ndarray,
-    weights: np.ndarray,
+    bins: FloatArray,
+    x: FloatArray,
+    widths: FloatArray,
+    weights: FloatArray,
     adaptive_error: float,
     shape: KernelShape = 'gauss',
-    fit: ErrorFit = 'cheby-log') -> np.ndarray:
+    fit: ErrorFit = 'cheby-log') -> FloatArray:
     """
     Broadens a spectrum using a variable-width kernel, taking the
     same arguments as `variable_width` but expects arrays with
@@ -298,7 +299,7 @@ def _width_interpolated_broadening(
 
 
 def find_coeffs(spacing: float,
-                shape: KernelShape = 'gauss') -> np.ndarray:
+                shape: KernelShape = 'gauss') -> FloatArray:
     """"
     Function that, for a given spacing value, gives the coefficients of the
     polynomial which describes the relationship between kernel width and the

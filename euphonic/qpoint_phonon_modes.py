@@ -3,14 +3,14 @@
 from collections.abc import Mapping
 import math
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 import numpy as np
 import numpy.typing as npt
-from typing_extensions import Self
+from typing_extensions import NotRequired, Self
 
 from euphonic.broadening import ErrorFit
-from euphonic.crystal import Crystal
+from euphonic.crystal import Crystal, CrystalDict
 from euphonic.debye_waller import DebyeWaller
 from euphonic.io import _obj_from_json_file, _obj_to_dict, _process_dict
 from euphonic.qpoint_frequencies import AdaptiveMethod, QpointFrequencies
@@ -20,6 +20,22 @@ from euphonic.structure_factor import StructureFactor
 from euphonic.ureg import Quantity, ureg
 from euphonic.util import direction_changed, get_reference_data, is_gamma
 from euphonic.validate import _check_constructor_inputs
+
+ComplexArray = npt.NDArray[np.complexfloating]
+FloatArray = npt.NDArray[np.floating]
+IntArray = npt.NDArray[np.integer]
+StrArray = npt.NDArray[np.str_]
+
+
+class PhononModeDict(TypedDict):
+    """Parameters necessary for creating a :class:`QpointPhononModes`."""
+    crystal: CrystalDict
+    qpts: FloatArray
+    frequencies: FloatArray
+    frequencies_unit: str
+    eigenvectors: ComplexArray
+    n_qpts: NotRequired[int]
+    weights: NotRequired[FloatArray]
 
 
 class QpointPhononModes(QpointFrequencies):
@@ -50,7 +66,8 @@ class QpointPhononModes(QpointFrequencies):
     """
 
     def __init__(self, crystal: Crystal, qpts: npt.NDArray[np.floating],
-                 frequencies: Quantity, eigenvectors: npt.NDArray[np.floating],
+                 frequencies: Quantity,
+                 eigenvectors: npt.NDArray[np.complexfloating],
                  weights: npt.NDArray[np.floating] | None = None) -> None:
         """
         Parameters
@@ -621,7 +638,7 @@ class QpointPhononModes(QpointFrequencies):
         return Spectrum1DCollection(
             dos_bins, all_dos_y_data, metadata=metadata)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> PhononModeDict:
         """
         Convert to a dictionary. See QpointPhononModes.from_dict for
         details on keys/values
@@ -637,7 +654,7 @@ class QpointPhononModes(QpointFrequencies):
             self.crystal, self.qpts, self.frequencies, self.weights)
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> Self:
+    def from_dict(cls, d: PhononModeDict) -> Self:
         """
         Convert a dictionary to a QpointPhononModes object
 

@@ -10,7 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Literal, overload
 import warnings
 
 import numpy as np
@@ -330,6 +330,15 @@ def _insert_gamma(bandpath: dict) -> None:
 XTickLabels = list[tuple[int, str]]
 SplitArgs = dict[str, Any]
 
+@overload
+def _bands_from_force_constants(
+    *args, frequencies_only: Literal[True], **kwargs,
+) -> tuple[QpointFrequencies, XTickLabels, SplitArgs]: ...
+
+@overload
+def _bands_from_force_constants(
+    *args, frequencies_only: Literal[False] = False, **kwargs,
+) -> tuple[QpointPhononModes, XTickLabels, SplitArgs]: ...
 
 def _bands_from_force_constants(data: ForceConstants,
                                 q_distance: Quantity,
@@ -366,6 +375,7 @@ def _bands_from_force_constants(data: ForceConstants,
         modes = data.calculate_qpoint_phonon_modes(qpts,
                                                    reduce_qpts=False,
                                                    **calc_modes_kwargs)
+
     return modes, x_tick_labels, split_args
 
 

@@ -61,6 +61,7 @@ class SpectrumData2D(SpectrumData1D):
     z_data: npt.NDArray[np.floating]
     z_data_unit: str
 
+SD = TypeVar('SD', bound=SpectrumData1D)
 
 class SpectrumCollectionMixin(ABC, Generic[S]):
     """Help a collection of spectra work with "line_data" metadata file
@@ -501,7 +502,7 @@ class SpectrumCollectionMixin(ABC, Generic[S]):
         return self.from_spectra([self[list(indices(group))].sum()
                                   for group in groups.values()])
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> SD:
         """
         Convert to a dictionary consistent with from_dict()
 
@@ -517,7 +518,7 @@ class SpectrumCollectionMixin(ABC, Generic[S]):
         return _obj_to_dict(self, attrs)
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> Self:
+    def from_dict(cls, d: SD) -> Self:
         """Initialise a Spectrum Collection object from dict"""
         data_keys = [f'{dim}_data' for dim in cls._bin_axes]
         data_keys.append(cls._spectrum_data_name())
