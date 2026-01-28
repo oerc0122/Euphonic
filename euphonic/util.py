@@ -1,16 +1,18 @@
 from collections.abc import Sequence
 from functools import partial, reduce
 from importlib.resources import files
-import itertools
 import json
 import math
+from numbers import Integral
 from pathlib import Path
 import sys
 import textwrap
+from typing import TypeVar
 import warnings
 
 import numpy as np
 from numpy.random import Generator, RandomState
+import numpy.typing as npt
 from pint import UndefinedUnitError
 import seekpath
 from seekpath.hpkot import SymmetryDetectionError
@@ -25,6 +27,8 @@ except ImportError:
     no_cell_error_types = (SymmetryDetectionError,)
 
 zips = partial(zip, strict=True)
+T = TypeVar('T')
+ThreeVector = npt.NDArray | tuple[T, T, T]
 
 
 def dedent_and_fill(text: str) -> str:
@@ -52,8 +56,8 @@ def dedent_and_fill(text: str) -> str:
     return '\n\n'.join(textwrap.fill(paragraph) for paragraph in paragraphs)
 
 
-def direction_changed(qpts: np.ndarray, tolerance: float = 5e-6,
-                      ) -> np.ndarray:
+def direction_changed(qpts: npt.NDArray[np.floating], tolerance: float = 5e-6,
+                      ) -> npt.NDArray[np.bool]:
     """
     Determines whether the q-direction has changed between each pair of
     q-points
@@ -86,7 +90,7 @@ def direction_changed(qpts: np.ndarray, tolerance: float = 5e-6,
     return np.abs(np.abs(dot) - modq[1:]*modq[:-1]) > tolerance
 
 
-def is_gamma(qpt: np.ndarray) -> bool | np.ndarray:
+def is_gamma(qpt: npt.NDArray[np.floating]) -> np.bool | npt.NDArray[np.bool]:
     """
     Determines whether the given point(s) are gamma points
 
@@ -104,7 +108,8 @@ def is_gamma(qpt: np.ndarray) -> bool | np.ndarray:
     """
     return np.isclose(qpt, np.rint(qpt), atol=1e-15).all(axis=-1)
 
-def mp_grid(grid: tuple[int, int, int]) -> np.ndarray:
+def mp_grid(
+    grid: ThreeVector[np.integer, Integral]) -> npt.NDArray[np.floating]:
     """
     Returns the q-points on a MxNxL Monkhorst-Pack grid specified by
     grid
@@ -132,9 +137,9 @@ def mp_grid(grid: tuple[int, int, int]) -> np.ndarray:
     return np.column_stack((qh, qk, ql))
 
 
-def get_all_origins(max_xyz: tuple[int, int, int],
-                    min_xyz: tuple[int, int, int] = (0, 0, 0),
-                    step: int = 1) -> np.ndarray:
+def get_all_origins(max_xyz: ThreeVector[np.integer, int],
+                    min_xyz: ThreeVector[np.integer, int] = (0, 0, 0),
+                    step: int = 1) -> npt.NDArray[np.integer]:
     """
     Given the max/min number of cells in each direction, get a list of
     all possible cell origins
@@ -163,7 +168,7 @@ def get_all_origins(max_xyz: tuple[int, int, int],
     return np.column_stack((nx, ny, nz))
 
 
-def get_qpoint_labels(qpts: np.ndarray,
+def get_qpoint_labels(qpts: npt.NDArray[np.floating],
                       cell: tuple[list[list[float]],
                                   list[list[float]],
                                   list[int]] | None = None,
@@ -341,11 +346,15 @@ def mode_gradients_to_widths(mode_gradients: Quantity, cell_vectors: Quantity,
         mode_gradients.units/cell_vectors.units)
 
 
-def convert_fc_phases(force_constants: np.ndarray, atom_r: np.ndarray,
-                      sc_atom_r: np.ndarray, uc_to_sc_atom_idx: np.ndarray,
-                      sc_to_uc_atom_idx: np.ndarray, sc_matrix: np.ndarray,
+def convert_fc_phases(force_constants: npt.NDArray[np.floating],
+                      atom_r: npt.NDArray[np.floating],
+                      sc_atom_r: npt.NDArray[np.floating],
+                      uc_to_sc_atom_idx: npt.NDArray[np.integer],
+                      sc_to_uc_atom_idx: npt.NDArray[np.integer],
+                      sc_matrix: npt.NDArray[np.integer],
                       cell_origins_tol: float = 1e-5,
-                      ) -> tuple[np.ndarray, np.ndarray]:
+                      ) -> tuple[npt.NDArray[np.floating],
+                                 npt.NDArray[np.integer]]:
     """
     Convert from a force constants matrix which uses the atom
     coordinates as r in the e^-iq.r phase (Phonopy-like), to a
@@ -492,13 +501,13 @@ def _cell_vectors_to_volume(cell_vectors: Quantity) -> Quantity:
 
 def _get_unique_elems_and_idx(
         all_elems: Sequence[tuple[int | str, ...]],
-        ) -> dict[tuple[int | str, ...], np.ndarray]:
+        ) -> dict[tuple[int | str, ...], IntArray]:
     """
     Returns an ordered dictionary mapping the unique sequences of
     elements to their indices
     """
     # Abuse dict keys to get an "ordered set" of elems for iteration
-    unique_elems = dict(zip(all_elems, itertools.cycle([None]))).keys()
+    unique_elems = dict.fromkeys(all_elems).keys()
     return {
         elem: np.asarray([i for i, other_elem in enumerate(all_elems)
                           if elem == other_elem])
@@ -506,7 +515,7 @@ def _get_unique_elems_and_idx(
     }
 
 
-def _calc_abscissa(reciprocal_cell: Quantity, qpts: np.ndarray,
+def _calc_abscissa(reciprocal_cell: Quantity, qpts: npt.NDArray[np.floating],
                    ) -> Quantity:
     """
     Calculates the distance between q-points (e.g. to use as a plot
@@ -564,11 +573,12 @@ def _calc_abscissa(reciprocal_cell: Quantity, qpts: np.ndarray,
     return abscissa*ureg('1/bohr').to(reciprocal_cell.units)
 
 
-def _recip_space_labels(qpts: np.ndarray,
+def _recip_space_labels(qpts: npt.NDArray[np.floating],
                         cell: tuple[list[list[float]],
                                     list[list[float]],
                                     list[int]] | None,
-                        ) -> tuple[np.ndarray, np.ndarray]:
+                        ) -> tuple[npt.NDArray[np.str_],
+                                   npt.NDArray[np.integer]]:
     """
     Gets q-points point labels (e.g. GAMMA, X, L) for the q-points at
     which the path through reciprocal space changes direction or where a
@@ -661,7 +671,7 @@ def _generic_qpt_labels() -> dict[str, tuple[float, float, float]]:
     return generic_labels
 
 
-def _get_qpt_label(qpt: np.ndarray,
+def _get_qpt_label(qpt: npt.NDArray[np.floating],
                    point_labels: dict[str, tuple[float, float, float]],
                    ) -> str:
     """
@@ -718,8 +728,9 @@ def _get_qpt_label(qpt: np.ndarray,
 CHUNK_SIZE = 100
 
 
-def _get_supercell_relative_idx(cell_origins: np.ndarray,
-                                sc_matrix: np.ndarray) -> np.ndarray:
+def _get_supercell_relative_idx(cell_origins: npt.NDArray[np.integer],
+                                sc_matrix: npt.NDArray[np.integer],
+                                ) -> npt.NDArray[np.integer]:
     """"
     For each cell_origins[i] -> cell_origins[j] vector in the supercell,
     gets the index n of the equivalent cell_origins[n] vector, where

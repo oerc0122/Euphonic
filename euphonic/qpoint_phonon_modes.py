@@ -3,12 +3,14 @@
 from collections.abc import Mapping
 import math
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TypedDict
 
 import numpy as np
+import numpy.typing as npt
+from typing_extensions import NotRequired, Self
 
 from euphonic.broadening import ErrorFit
-from euphonic.crystal import Crystal
+from euphonic.crystal import Crystal, CrystalDict
 from euphonic.debye_waller import DebyeWaller
 from euphonic.io import _obj_from_json_file, _obj_to_dict, _process_dict
 from euphonic.qpoint_frequencies import AdaptiveMethod, QpointFrequencies
@@ -18,6 +20,22 @@ from euphonic.structure_factor import StructureFactor
 from euphonic.ureg import Quantity, ureg
 from euphonic.util import direction_changed, get_reference_data, is_gamma
 from euphonic.validate import _check_constructor_inputs
+
+ComplexArray = npt.NDArray[np.complexfloating]
+FloatArray = npt.NDArray[np.floating]
+IntArray = npt.NDArray[np.integer]
+StrArray = npt.NDArray[np.str_]
+
+
+class PhononModeDict(TypedDict):
+    """Parameters necessary for creating a :class:`QpointPhononModes`."""
+    crystal: CrystalDict
+    qpts: FloatArray
+    frequencies: FloatArray
+    frequencies_unit: str
+    eigenvectors: ComplexArray
+    n_qpts: NotRequired[int]
+    weights: NotRequired[FloatArray]
 
 
 class QpointPhononModes(QpointFrequencies):
@@ -46,11 +64,11 @@ class QpointPhononModes(QpointFrequencies):
         coordinates, using the same Cartesian basis as the
         cell_vectors in the crystal object
     """
-    T = TypeVar('T', bound='QpointPhononModes')
 
-    def __init__(self, crystal: Crystal, qpts: np.ndarray,
-                 frequencies: Quantity, eigenvectors: np.ndarray,
-                 weights: np.ndarray | None = None) -> None:
+    def __init__(self, crystal: Crystal, qpts: npt.NDArray[np.floating],
+                 frequencies: Quantity,
+                 eigenvectors: npt.NDArray[np.complexfloating],
+                 weights: npt.NDArray[np.floating] | None = None) -> None:
         """
         Parameters
         ----------
@@ -418,7 +436,7 @@ class QpointPhononModes(QpointFrequencies):
         dw = dw/np.sum(weights)
         if symmetrise:
             dw_tmp = np.zeros(dw.shape)
-            (rot, trans,
+            (rot, _trans,
              eq_atoms) = self.crystal.get_symmetry_equivalent_atoms()
             cell_vec = self.crystal._cell_vectors
             recip_vec = self.crystal.reciprocal_cell().to('1/bohr').magnitude
@@ -437,7 +455,7 @@ class QpointPhononModes(QpointFrequencies):
             mode_widths: Quantity | None = None,
             mode_widths_min: Quantity = Quantity(0.01, 'meV'),
             adaptive_method: AdaptiveMethod = 'reference',
-            adaptive_error: float | None = 0.01,
+            adaptive_error: float = 0.01,
             adaptive_error_fit: ErrorFit = 'cubic',
             weighting: str | None = None,
             cross_sections: str | dict[str, Quantity] = 'BlueBook',
@@ -620,7 +638,7 @@ class QpointPhononModes(QpointFrequencies):
         return Spectrum1DCollection(
             dos_bins, all_dos_y_data, metadata=metadata)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> PhononModeDict:
         """
         Convert to a dictionary. See QpointPhononModes.from_dict for
         details on keys/values
@@ -636,7 +654,7 @@ class QpointPhononModes(QpointFrequencies):
             self.crystal, self.qpts, self.frequencies, self.weights)
 
     @classmethod
-    def from_dict(cls: type[T], d: dict[str, Any]) -> T:
+    def from_dict(cls, d: PhononModeDict) -> Self:
         """
         Convert a dictionary to a QpointPhononModes object
 
@@ -661,7 +679,7 @@ class QpointPhononModes(QpointFrequencies):
                    d['eigenvectors'], d['weights'])
 
     @classmethod
-    def from_json_file(cls: type[T], filename: Path | str) -> T:
+    def from_json_file(cls, filename: Path | str) -> Self:
         """
         Read from a JSON file. See QpointPhononModes.from_dict for
         required fields
@@ -675,9 +693,9 @@ class QpointPhononModes(QpointFrequencies):
                                    type_dict={'eigenvectors': np.complex128})
 
     @classmethod
-    def from_castep(cls: type[T], filename: Path | str,
+    def from_castep(cls, filename: Path | str,
                     average_repeat_points: bool = True,
-                    prefer_non_loto: bool = False) -> T:
+                    prefer_non_loto: bool = False) -> Self:
         """
         Reads precalculated phonon mode data from a CASTEP .phonon file
 
@@ -704,10 +722,10 @@ class QpointPhononModes(QpointFrequencies):
         return cls.from_dict(data)
 
     @classmethod
-    def from_phonopy(cls: type[T], path: Path | str = '.',
+    def from_phonopy(cls, path: Path | str = '.',
                      phonon_name: Path | str = 'band.yaml',
                      phonon_format: str | None = None,
-                     summary_name: Path | str = 'phonopy.yaml') -> T:
+                     summary_name: Path | str = 'phonopy.yaml') -> Self:
         """
         Reads precalculated phonon mode data from a Phonopy
         mesh/band/qpoints.yaml/hdf5 file. May also read from

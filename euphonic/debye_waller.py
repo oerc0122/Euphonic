@@ -1,16 +1,28 @@
 import inspect
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TypedDict
 
-from euphonic.crystal import Crystal
+from typing_extensions import Self
+
+from euphonic.crystal import Crystal, CrystalDict
 from euphonic.io import (
     _obj_from_json_file,
     _obj_to_dict,
     _obj_to_json_file,
     _process_dict,
 )
+from euphonic.types import FloatArray
 from euphonic.ureg import Quantity, ureg
 from euphonic.validate import _check_constructor_inputs, _check_unit_conversion
+
+
+class DebyeWallerDict(TypedDict):
+    """Parameters necessary for creating a :class:`DebyeWaller`."""
+    crystal: CrystalDict
+    debye_waller: FloatArray
+    debye_waller_unit: str
+    temperature: float
+    temperature_unit: str
 
 
 class DebyeWaller:
@@ -31,7 +43,6 @@ class DebyeWaller:
         Scalar float Quantity. The temperature the Debye-Waller
         exponent was calculated at
     """
-    T = TypeVar('T', bound='DebyeWaller')
 
     def __init__(self, crystal: Crystal, debye_waller: Quantity,
                  temperature: Quantity) -> None:
@@ -88,7 +99,7 @@ class DebyeWaller:
                                ['debye_waller_unit', 'temperature_unit'])
         super().__setattr__(name, value)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> DebyeWallerDict:
         """
         Convert to a dictionary. See DebyeWaller.from_dict for details
         on keys/values
@@ -112,7 +123,7 @@ class DebyeWaller:
         _obj_to_json_file(self, filename)
 
     @classmethod
-    def from_dict(cls: type[T], d: dict[str, Any]) -> T:
+    def from_dict(cls, d: DebyeWallerDict) -> Self:
         """
         Convert a dictionary to a DebyeWaller object
 
@@ -137,7 +148,7 @@ class DebyeWaller:
         return cls(crystal, d['debye_waller'], d['temperature'])
 
     @classmethod
-    def from_json_file(cls: type[T], filename: Path | str) -> T:
+    def from_json_file(cls, filename: Path | str) -> Self:
         """
         Read from a JSON file. See DebyeWaller.from_dict for required
         fields

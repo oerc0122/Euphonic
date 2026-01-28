@@ -1,11 +1,12 @@
-from collections import OrderedDict
 import inspect
 from math import ceil
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TypedDict, cast
 
 import numpy as np
+import numpy.typing as npt
 import spglib
+from typing_extensions import Self
 
 from euphonic.io import (
     _obj_from_json_file,
@@ -16,6 +17,20 @@ from euphonic.io import (
 from euphonic.ureg import Quantity, ureg
 from euphonic.util import _cell_vectors_to_volume, _get_unique_elems_and_idx
 from euphonic.validate import _check_constructor_inputs, _check_unit_conversion
+
+FloatArray = npt.NDArray[np.floating]
+IntArray = npt.NDArray[np.integer]
+StrArray = npt.NDArray[np.str_]
+
+class CrystalDict(TypedDict):
+    """Parameters necessary for creating a :class:`Crystal`."""
+    n_atoms: int
+    cell_vectors: FloatArray
+    cell_vectors_unit: str
+    atom_r: FloatArray
+    atom_type: StrArray
+    atom_mass: FloatArray
+    atom_mass_unit: str
 
 
 class Crystal:
@@ -39,10 +54,8 @@ class Crystal:
         Shape (n_atoms,) float Quantity in mass units. The mass of each
         atom in the unit cell
     """
-    T = TypeVar('T', bound='Crystal')
-
-    def __init__(self, cell_vectors: Quantity, atom_r: np.ndarray,
-                 atom_type: np.ndarray, atom_mass: Quantity) -> None:
+    def __init__(self, cell_vectors: Quantity, atom_r: FloatArray,
+                 atom_type: StrArray, atom_mass: Quantity) -> None:
         """
         Parameters
         ----------
@@ -187,7 +200,7 @@ class Crystal:
                 self.atom_r.tolist(),
                 unique_atoms.tolist())
 
-    def get_species_idx(self) -> 'OrderedDict[str, np.ndarray]':
+    def get_species_idx(self) -> dict[str, IntArray]:
         """
         Returns a dictionary of each species and their indices
 
@@ -201,12 +214,11 @@ class Crystal:
         species_dict = _get_unique_elems_and_idx(
             [(at,) for at in self.atom_type])
         # Convert tuples back to string
-        return OrderedDict([(str(key[0]), value)
-                            for key, value in species_dict.items()])
+        return {str(key[0]): value for key, value in species_dict.items()}
 
     def get_symmetry_equivalent_atoms(
             self, tol: Quantity = Quantity(1e-5, 'angstrom'),
-            ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+            ) -> tuple[IntArray, FloatArray, IntArray]:
         """
         Returns the rotational and translational symmetry operations
         as obtained by spglib.get_symmetry, and also the equivalent
@@ -287,7 +299,7 @@ class Crystal:
 
         return symm['rotations'], symm['translations'], equiv_atoms
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> CrystalDict:
         """
         Convert to a dictionary. See Crystal.from_dict for details on
         keys/values
@@ -296,8 +308,9 @@ class Crystal:
         -------
         dict
         """
-        return _obj_to_dict(self, ['cell_vectors', 'n_atoms', 'atom_r',
-                                   'atom_type', 'atom_mass'])
+        return cast('CrystalDict',
+                    _obj_to_dict(self, ['cell_vectors', 'n_atoms', 'atom_r',
+                                        'atom_type', 'atom_mass']))
 
     def to_json_file(self, filename: Path | str) -> None:
         """
@@ -312,7 +325,7 @@ class Crystal:
         _obj_to_json_file(self, filename)
 
     @classmethod
-    def from_dict(cls: type[T], d: dict[str, Any]) -> T:
+    def from_dict(cls, d: CrystalDict) -> Self:
         """
         Convert a dictionary to a Crystal object
 
@@ -337,7 +350,7 @@ class Crystal:
                    d['atom_mass'])
 
     @classmethod
-    def from_json_file(cls: type[T], filename: Path | str) -> T:
+    def from_json_file(cls, filename: Path | str) -> Self:
         """
         Read from a JSON file. See Crystal.from_dict for required fields
 
@@ -353,7 +366,7 @@ class Crystal:
         return _obj_from_json_file(cls, filename)
 
     @classmethod
-    def from_cell_vectors(cls: type[T], cell_vectors: Quantity) -> T:
+    def from_cell_vectors(cls, cell_vectors: Quantity) -> Self:
         """
         Create a Crystal object from just cell vectors, containing no
         detailed structure information (atomic positions, species,

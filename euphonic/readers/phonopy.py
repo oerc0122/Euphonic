@@ -1,16 +1,87 @@
 from contextlib import suppress
 from pathlib import Path
 import re
-from typing import Any, TextIO
+from typing import TYPE_CHECKING, Any, NamedTuple, TextIO, TypedDict
 import warnings
 
 import numpy as np
+import numpy.typing as npt
+from typing_extensions import NotRequired
 
+from euphonic.force_constants import ForceConstantsDict
+from euphonic.qpoint_phonon_modes import PhononModeDict
+from euphonic.types import ComplexArray, FloatArray, IntArray, StrArray
 from euphonic.ureg import ureg
 from euphonic.util import convert_fc_phases, dedent_and_fill
 
+_have_h_have_h5py: Exception | None
+_have_yaml: Exception | None
+
+try:
+    import yaml
+    try:
+        from yaml import CSafeLoader as SafeLoader
+    except ImportError:
+        from yaml import SafeLoader
+    _have_yaml = None
+except ModuleNotFoundError as e:
+    _have_yaml = e
+
+try:
+    import h5py
+    _have_h5py = None
+except ModuleNotFoundError as e:
+    _have_h5py = e
+
 HDF5_EXTS = {'hdf5', 'hd5', 'h5'}
 YAML_EXTS = {'yaml', 'yml', 'yl'}
+
+class _PartialPhononDict(TypedDict):
+    qpts: FloatArray
+    frequencies: FloatArray
+    eigenvectors: NotRequired[FloatArray]
+    weights: NotRequired[FloatArray]
+
+    cell_vectors: NotRequired[FloatArray]
+    atom_r: NotRequired[FloatArray]
+    atom_type: NotRequired[StrArray]
+    atom_mass: NotRequired[FloatArray]
+
+
+class _SummaryDict(TypedDict):
+    n_atoms : int
+    cell_vectors: FloatArray
+    atom_r: FloatArray
+    atom_type: StrArray
+    atom_mass: FloatArray
+    ulength: str
+    umass: str
+
+    sc_matrix: IntArray
+    sc_atom_r: FloatArray
+    pc_to_sc_atom_idx: IntArray
+    sc_to_pc_atom_idx: IntArray
+    ufc: str
+
+    force_constants: NotRequired[FloatArray]
+
+    nac_factor: NotRequired[FloatArray]
+    born: NotRequired[FloatArray]
+    dielectric: NotRequired[FloatArray]
+
+class _BornDict(TypedDict):
+    dielectric: FloatArray
+    born: FloatArray
+    nac_factor: NotRequired[float]
+
+class _CrystalData(NamedTuple):
+    cell_vectors: FloatArray
+    n_atoms: int
+    atom_r: FloatArray
+    atom_mass: FloatArray
+    atom_type: StrArray
+    idx_in_pcell: IntArray
+
 
 # h5py can't be called from Matlab, so import as late as possible to
 # minimise impact. Do the same with yaml for consistency
@@ -27,7 +98,7 @@ class ImportPhonopyReaderError(ModuleNotFoundError):
         return self.message
 
 
-def _convert_weights(weights: np.ndarray) -> np.ndarray:
+def _convert_weights(weights: FloatArray) -> FloatArray:
     """
     Convert q-point weights to normalised convention
 
@@ -47,7 +118,7 @@ def _convert_weights(weights: np.ndarray) -> np.ndarray:
 
 def _extract_phonon_data_yaml(filename: Path,
                               read_eigenvectors: bool = True,
-                              ) -> dict[str, np.ndarray]:
+                              ) -> _PartialPhononDict:
     """
     From a mesh/band/qpoint.yaml file, extract the relevant information
     as a dict of Numpy arrays. No unit conversion is done at this point,
@@ -71,26 +142,21 @@ def _extract_phonon_data_yaml(filename: Path,
             'eigenvectors', 'weights', 'cell_vectors', 'atom_r',
             'atom_mass', 'atom_type'
     """
-    try:
-        import yaml
-        try:
-            from yaml import CSafeLoader as SafeLoader
-        except ImportError:
-            from yaml import SafeLoader
-    except ModuleNotFoundError as e:
-        raise ImportPhonopyReaderError from e
+    if isinstance(_have_yaml, Exception):
+        raise ImportPhonopyReaderError from _have_yaml
 
     with open(filename) as yaml_file:
         phonon_data = yaml.load(yaml_file, Loader=SafeLoader)
 
-    data_dict = {}
     phonons = list(phonon_data['phonon'])
     bands_data_each_qpt = [bands_data['band'] for bands_data in phonons]
 
-    data_dict['qpts'] = np.array([phon['q-position'] for phon in phonons])
-    data_dict['frequencies'] = np.array(
-        [[band_data['frequency'] for band_data in bands_data]
-         for bands_data in bands_data_each_qpt])
+    data_dict: _PartialPhononDict = {
+        'qpts': np.array([phon['q-position'] for phon in phonons]),
+        'frequencies': np.array(
+            [[band_data['frequency'] for band_data in bands_data]
+             for bands_data in bands_data_each_qpt]),
+    }
     if read_eigenvectors:
         # Eigenvectors may not be present if users haven't set
         # --eigvecs when running Phonopy - deal with this later
@@ -118,7 +184,7 @@ def _extract_phonon_data_yaml(filename: Path,
 
 def _extract_phonon_data_hdf5(filename: Path,
                               read_eigenvectors: bool = True,
-                              ) -> dict[str, np.ndarray]:
+                              ) -> _PartialPhononDict:
     """
     From a mesh/band/qpoint.hdf5 file, extract the relevant information
     as a dict of Numpy arrays. No unit conversion is done at this point,
@@ -141,16 +207,16 @@ def _extract_phonon_data_hdf5(filename: Path,
         .hdf5 file:
             'eigenvectors', 'weights'
     """
-    try:
-        import h5py
-    except ModuleNotFoundError as e:
-        raise ImportPhonopyReaderError from e
+    if isinstance(_have_h5py, Exception):
+        raise ImportPhonopyReaderError from _have_h5py
 
+    data_dict: _PartialPhononDict
     with h5py.File(filename, 'r') as hdf5_file:
-        data_dict = {}
         if 'qpoint' in hdf5_file:
-            data_dict['qpts'] = hdf5_file['qpoint'][()]
-            data_dict['frequencies'] = hdf5_file['frequency'][()]
+            data_dict = {
+                'qpts': hdf5_file['qpoint'][()],
+                'frequencies': hdf5_file['frequency'][()],
+            }
             if read_eigenvectors:
                 # Eigenvectors may not be present if users haven't set
                 # --eigvecs when running Phonopy - deal with this later
@@ -164,10 +230,13 @@ def _extract_phonon_data_hdf5(filename: Path,
         # Is a band.hdf5 file - q-points are stored in 'path' and need
         # special treatment
         else:
-            data_dict['qpts'] = hdf5_file['path'][()].reshape(
-                -1, hdf5_file['path'][()].shape[-1])
-            data_dict['frequencies'] = hdf5_file['frequency'][()].reshape(
-                -1, hdf5_file['frequency'][()].shape[-1])
+            data_dict = {
+                'qpts': hdf5_file['path'][()].reshape(
+                    -1, hdf5_file['path'][()].shape[-1]),
+                'frequencies': hdf5_file['frequency'][()].reshape(
+                    -1, hdf5_file['frequency'][()].shape[-1]),
+            }
+
             with suppress(KeyError):
                 # The last 2 dimensions of eigenvectors in bands.hdf5 are for
                 # some reason transposed compared to mesh/qpoints.hdf5, so also
@@ -188,7 +257,7 @@ def read_phonon_data(
         atom_mass_unit: str = 'amu',
         frequencies_unit: str = 'meV',
         read_eigenvectors: bool = True,
-        ) -> dict[str, int | str | np.ndarray]:
+        ) -> PhononModeDict:
     """
     Reads precalculated phonon mode data from a Phonopy
     mesh/band/qpoints.yaml/hdf5 file and returns it in a dictionary.
@@ -266,10 +335,10 @@ def read_phonon_data(
     umass = 'amu'
     ufreq = 'THz'
 
-    crystal_keys = ['cell_vectors', 'atom_r', 'atom_mass', 'atom_type']
+    crystal_keys = {'cell_vectors', 'atom_r', 'atom_mass', 'atom_type'}
     # Check if crystal structure has been read from phonon_file, if not
     # get structure from summary_file
-    if len(crystal_keys & phonon_dict.keys()) != len(crystal_keys):
+    if not crystal_keys <= phonon_dict.keys():
         summary_dict = _extract_summary(summary_path)
         phonon_dict['cell_vectors'] = summary_dict['cell_vectors']
         phonon_dict['atom_r'] = summary_dict['atom_r']
@@ -286,24 +355,25 @@ def read_phonon_data(
             )
             raise ValueError(msg)
 
-    data_dict: dict[str, Any] = {}
-    data_dict['crystal'] = {}
-    cry_dict = data_dict['crystal']
-    cry_dict['n_atoms'] = len(phonon_dict['atom_r'])
-    cry_dict['cell_vectors'] = phonon_dict['cell_vectors']*ureg(
-        ulength).to(cell_vectors_unit).magnitude
-    cry_dict['cell_vectors_unit'] = cell_vectors_unit
-    cry_dict['atom_r'] = phonon_dict['atom_r']
-    cry_dict['atom_type'] = phonon_dict['atom_type']
-    cry_dict['atom_mass'] = phonon_dict['atom_mass']*ureg(
-        umass).to(atom_mass_unit).magnitude
-    cry_dict['atom_mass_unit'] = atom_mass_unit
     n_qpts = len(phonon_dict['qpts'])
-    data_dict['n_qpts'] = n_qpts
-    data_dict['qpts'] = phonon_dict['qpts']
-    data_dict['frequencies'] = phonon_dict['frequencies']*ureg(
-        ufreq).to(frequencies_unit).magnitude
-    data_dict['frequencies_unit'] = frequencies_unit
+    data_dict: PhononModeDict = {
+        'n_qpts': n_qpts,
+        'qpts': phonon_dict['qpts'],
+        'frequencies': phonon_dict['frequencies']*ureg(
+            ufreq).to(frequencies_unit).magnitude,
+        'frequencies_unit': frequencies_unit,
+        'crystal': {
+            'n_atoms': len(phonon_dict['atom_r']),
+            'cell_vectors': phonon_dict['cell_vectors']*ureg(
+                ulength).to(cell_vectors_unit).magnitude,
+            'cell_vectors_unit': cell_vectors_unit,
+            'atom_r': phonon_dict['atom_r'],
+            'atom_type': phonon_dict['atom_type'],
+            'atom_mass': phonon_dict['atom_mass']*ureg(
+                umass).to(atom_mass_unit).magnitude,
+            'atom_mass_unit': atom_mass_unit,
+        },
+    }
     if read_eigenvectors:
         # Convert Phonopy conventions to Euphonic conventions
         data_dict['eigenvectors'] = convert_eigenvector_phases(phonon_dict)
@@ -312,8 +382,7 @@ def read_phonon_data(
     return data_dict
 
 
-def convert_eigenvector_phases(phonon_dict: dict[str, np.ndarray],
-                               ) -> np.ndarray:
+def convert_eigenvector_phases(phonon_dict: _PartialPhononDict) -> ComplexArray:
     """
     When interpolating the force constants matrix, Euphonic uses a phase
     convention of e^iq.r_a, where r_a is the coordinate of each CELL in
@@ -377,10 +446,8 @@ def _extract_force_constants(fc_path: Path, n_atoms: int, n_cells: int,
 def _extract_force_constants_hdf5(
         filename: Path, n_atoms: int, n_cells: int, summary_name: Path,
         ) -> np.ndarray:
-    try:
-        import h5py
-    except ModuleNotFoundError as e:
-        raise ImportPhonopyReaderError from e
+    if isinstance(_have_h5py, Exception):
+        raise ImportPhonopyReaderError from _have_h5py
 
     with h5py.File(filename, 'r') as fc_file:
         fc = fc_file['force_constants'][:]
@@ -405,7 +472,7 @@ def _check_fc_shape(fc_shape: tuple[int, int], n_atoms: int,
         raise ValueError(msg)
 
 
-def _extract_born(born_file_obj: TextIO) -> dict[str, float | np.ndarray]:
+def _extract_born(born_file_obj: TextIO) -> _BornDict:
     """
     Parse and convert dielectric tensor and born effective
     charge from BORN file
@@ -429,28 +496,29 @@ def _extract_born(born_file_obj: TextIO) -> dict[str, float | np.ndarray]:
         else:
             born_lines.append([float(x) for x in line.split()])
 
-    born_dict: dict[str, float | np.ndarray] = {}
 
     idx0 = 0
     if len(born_lines[0]) == 1:
         # Then this is the NAC conversion factor
-        born_dict['nac_factor'] = born_lines[0][0]
+        nac_factor = born_lines[0][0]
         idx0 = 1
 
-    # dielectric first line after factor
-    # xx, xy, xz, yx, yy, yz, zx, zy, zz.
-    born_dict['dielectric'] = np.array(born_lines[idx0]).reshape([3,3])
-
-    # born charges after dielectric
-    # xx, xy, xz, yx, yy, yz, zx, zy, zz.
-    born_dict['born'] = np.array(
-        [np.array(bl).reshape([3,3]) for bl in born_lines[idx0+1:]])
+    born_dict: _BornDict = {
+        # dielectric first line after factor
+        # xx, xy, xz, yx, yy, yz, zx, zy, zz.
+        'dielectric': np.array(born_lines[idx0]).reshape([3,3]),
+        # born charges after dielectric
+        # xx, xy, xz, yx, yy, yz, zx, zy, zz.
+        'born': np.array(
+        [np.array(bl).reshape([3,3]) for bl in born_lines[idx0+1:]]),
+    }
+    if idx0 == 1:
+        born_dict['nac_factor'] = nac_factor
 
     return born_dict
 
 
-def _extract_summary(filename: Path, fc_extract: bool = False,
-                     ) -> dict[str, str | int | np.ndarray]:
+def _extract_summary(filename: Path, fc_extract: bool = False) -> _SummaryDict:
     """
     Read phonopy.yaml for summary data produced during the Phonopy
     post-process
@@ -471,21 +539,14 @@ def _extract_summary(filename: Path, fc_extract: bool = False,
         following keys: sc_matrix, n_cells_in_sc, cell_origins,
         cell_origins_map, force_constants, ufc, born, dielectric
     """
-    try:
-        import yaml
-        try:
-            from yaml import CSafeLoader as SafeLoader
-        except ImportError:
-            from yaml import SafeLoader
-    except ModuleNotFoundError as e:
-        raise ImportPhonopyReaderError from e
+    if isinstance(_have_yaml, Exception):
+        raise ImportPhonopyReaderError from _have_yaml
 
     with open(filename) as summary_file:
         summary_object = yaml.load(summary_file, Loader=SafeLoader)
     (cell_vectors, n_atoms, atom_r, atom_mass,
      atom_type, _) = _extract_crystal_data(summary_object['primitive_cell'])
 
-    summary_dict = {}
     if 'physical_unit' in summary_object:
         pu = summary_object['physical_unit']
     else:
@@ -502,17 +563,19 @@ def _extract_summary(filename: Path, fc_extract: bool = False,
     divs = re.findall(r'/([^/]+)', pu['force_constants'])
     pu['force_constants'] = (pu['force_constants'].split('/')[0]
                              + '/(' + '/('.join([d+')' for d in divs]))
-    for key, value in pu.items():
-        pu[key] = value.replace('au', 'bohr').replace('Angstrom', 'angstrom')
 
-    summary_dict['ulength'] = pu['length']
-    summary_dict['umass'] = pu['atomic_mass']
+    pu = {key: value.replace('au', 'bohr').replace('Angstrom', 'angstrom')
+          for key, value in pu.items()}
 
-    summary_dict['n_atoms'] = n_atoms
-    summary_dict['cell_vectors'] = cell_vectors
-    summary_dict['atom_r'] = atom_r
-    summary_dict['atom_type'] = atom_type
-    summary_dict['atom_mass'] = atom_mass
+    summary_dict = {
+        'ulength': pu['length'],
+        'umass': pu['atomic_mass'],
+        'n_atoms': n_atoms,
+        'cell_vectors': cell_vectors,
+        'atom_r': atom_r,
+        'atom_type': atom_type,
+        'atom_mass': atom_mass,
+    }
 
     if fc_extract:
         # Get matrix to convert from primitive cell to unit cell
@@ -573,16 +636,13 @@ def _extract_summary(filename: Path, fc_extract: bool = False,
             if summary_dict[key] is None:
                 del summary_dict[key]
 
-        for key in ('born', 'dielectric'):
-            if key in summary_dict:
-                summary_dict[key] = np.array(summary_dict[key])
+        for key in {'born', 'dielectric'} & summary_dict.keys():
+            summary_dict[key] = np.array(summary_dict[key])
 
     return summary_dict
 
 
-def _extract_crystal_data(crystal: dict[str, Any],
-                          ) -> tuple[np.ndarray, int, np.ndarray,
-                                     np.ndarray, np.ndarray, np.ndarray]:
+def _extract_crystal_data(crystal: dict[str, Any]) -> _CrystalData:
     """
     Gets relevant data from a section of phonopy.yaml
 
@@ -630,7 +690,8 @@ def _extract_crystal_data(crystal: dict[str, Any],
         # If reduced_to isn't present it is already the primitive cell
         idx_in_pcell = np.arange(n_atoms, dtype=np.int32)
 
-    return cell_vectors, n_atoms, atom_r, atom_mass, atom_type, idx_in_pcell
+    return _CrystalData(cell_vectors, n_atoms, atom_r,
+                       atom_mass, atom_type, idx_in_pcell)
 
 
 def read_interpolation_data(
@@ -643,7 +704,7 @@ def read_interpolation_data(
         atom_mass_unit: str = 'amu',
         force_constants_unit: str = 'hartree/bohr**2',
         born_unit: str = 'e',
-        dielectric_unit: str = '(e**2)/(bohr*hartree)') -> dict[str, Any]:
+        dielectric_unit: str = '(e**2)/(bohr*hartree)') -> ForceConstantsDict:
     """
     Reads data from the phonopy summary file (default phonopy.yaml) and
     optionally born and force constants files. Only attempts to read
@@ -730,7 +791,7 @@ def read_interpolation_data(
 
     # Only read born/dielectric if they're not in summary file and the
     # user has specified a Born file
-    dipole_keys = ['born', 'dielectric', 'nac_factor']
+    dipole_keys = {'born', 'dielectric', 'nac_factor'}
     if (born_name is not None and
             len(dipole_keys & summary_dict.keys()) != len(dipole_keys)):
         born_path = basepath / born_name
@@ -759,28 +820,31 @@ def read_interpolation_data(
     umass = summary_dict['umass']
     ufc = summary_dict['ufc']
 
-    data_dict: dict[str, Any] = {}
-    cry_dict = data_dict['crystal'] = {}
-    cry_dict['cell_vectors'] = summary_dict['cell_vectors']*ureg(
-        ulength).to(cell_vectors_unit).magnitude
-    cry_dict['cell_vectors_unit'] = cell_vectors_unit
-    # Normalise atom coordinates
-    cry_dict['atom_r'] = (summary_dict['atom_r']
-                          - np.floor(summary_dict['atom_r']))
-    cry_dict['atom_type'] = summary_dict['atom_type']
-    cry_dict['atom_mass'] = summary_dict['atom_mass']*ureg(
-        umass).to(atom_mass_unit).magnitude
-    cry_dict['atom_mass_unit'] = atom_mass_unit
-
     fc, cell_origins = convert_fc_phases(
          summary_dict['force_constants'], summary_dict['atom_r'],
          summary_dict['sc_atom_r'], summary_dict['pc_to_sc_atom_idx'],
          summary_dict['sc_to_pc_atom_idx'], summary_dict['sc_matrix'])
-    data_dict['force_constants'] = fc*ureg(
-        ufc).to(force_constants_unit).magnitude
-    data_dict['force_constants_unit'] = force_constants_unit
-    data_dict['sc_matrix'] = summary_dict['sc_matrix']
-    data_dict['cell_origins'] = cell_origins
+
+    data_dict: ForceConstantsDict = {
+        'crystal': {
+            'n_atoms': len(summary_dict['atom_r']),
+            'cell_vectors': summary_dict['cell_vectors']*ureg(
+                ulength).to(cell_vectors_unit).magnitude,
+            'cell_vectors_unit': cell_vectors_unit,
+            # Normalise atom coordinates
+            'atom_r': (summary_dict['atom_r']
+                       - np.floor(summary_dict['atom_r'])),
+            'atom_type': summary_dict['atom_type'],
+            'atom_mass': summary_dict['atom_mass']*ureg(
+                umass).to(atom_mass_unit).magnitude,
+            'atom_mass_unit': atom_mass_unit,
+        },
+        'force_constants': fc*ureg(ufc).to(force_constants_unit).magnitude,
+        'force_constants_unit': force_constants_unit,
+        'sc_matrix': summary_dict['sc_matrix'],
+        'cell_origins': cell_origins,
+    }
+
 
     with suppress(KeyError):
         data_dict['born'] = summary_dict['born']*ureg(

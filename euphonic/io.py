@@ -1,8 +1,8 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 import copy
 import json
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Protocol, TypeVar, cast
 
 import numpy as np
 
@@ -10,6 +10,16 @@ from euphonic.ureg import Quantity, ureg
 from euphonic.version import __version__
 
 T = TypeVar('T')
+D = TypeVar('D', bound=Mapping[str, Any])
+
+class Storable(Protocol):
+    @classmethod
+    def from_dict(cls, d: D) -> T: ...
+
+    def to_dict(self) -> D: ...
+
+
+S = TypeVar('S', bound=Storable)
 
 
 def _to_json_dict(dictionary: dict[str, Any]) -> dict[str, Any]:
@@ -82,28 +92,30 @@ def _obj_to_dict(obj: T, attrs: Sequence[str]) -> dict[str, Any]:
     return dout
 
 
-def _process_dict(dictionary: dict[str, Any],
+def _process_dict(dictionary: D,
                   quantities: Sequence[str] = (),
-                  optional: Sequence[str] = ()) -> dict[str, Any]:
+                  optional: Sequence[str] = ()) -> D:
     """
     Process an input dictionary for creating objects. Convert keys in
     'quantities' to Quantity objects, and if any 'optional' keys are
     missing, set them to None
     """
 
-    dictionary = copy.deepcopy(dictionary)
+    # Need to assert dictionary is mutable.
+    dictionary_ = cast('dict[str, Any]', copy.deepcopy(dictionary))
+
     for okey in optional:
-        dictionary.setdefault(okey, None)
+        dictionary_.setdefault(okey, None)
 
     for qkey in quantities:
-        val = dictionary.pop(qkey)
+        val = dictionary_.pop(qkey)
         if val is not None:
-            val = val*ureg(dictionary.pop(qkey + '_unit'))
-        dictionary[qkey] = val
-    return dictionary
+            val = val*ureg(dictionary_.pop(qkey + '_unit'))
+        dictionary_[qkey] = val
+    return cast('D', dictionary_)
 
 
-def _obj_to_json_file(obj: T, filename: Path | str) -> None:
+def _obj_to_json_file(obj: Storable, filename: Path | str) -> None:
     """
     Generic function for writing to a JSON file from a Euphonic object
     """
@@ -115,8 +127,8 @@ def _obj_to_json_file(obj: T, filename: Path | str) -> None:
     print(f'Written to {Path(f.name).resolve()}')
 
 
-def _obj_from_json_file(cls: type[T], filename: Path | str,
-                        type_dict: dict[str, type[Any]]|None = None) -> T:
+def _obj_from_json_file(cls: type[S], filename: Path | str,
+                        type_dict: dict[str, type[Any]]|None = None) -> S:
     """
     Generic function for reading from a JSON file to a Euphonic object
     """

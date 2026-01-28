@@ -6,15 +6,41 @@ import struct
 from typing import (
     Any,
     BinaryIO,
+    Literal,
     NamedTuple,
     TextIO,
+    overload,
+    TypedDict,
 )
 
 import numpy as np
 from packaging.version import Version
 
+from euphonic.types import FloatArray, IntArray, StrArray
 from euphonic.ureg import ureg
 from euphonic.util import dedent_and_fill
+
+class DOSData(TypedDict):
+    n_atoms: int
+    cell_vectors: FloatArray
+    cell_vectors_unit: str
+    qpts: FloatArray
+    weights: FloatArray
+    frequencies: FloatArray
+    frequencies_unit: str
+    mode_gradients: FloatArray
+    mode_gradients_unit: str
+    dos_bins: FloatArray
+    dos_bins_unit: str
+    dos: dict[str, FloatArray]
+    dos_unit: str
+    pdos: FloatArray
+
+class CellData(NamedTuple):
+    cell_vectors: FloatArray
+    atom_r: FloatArray
+    atom_type: StrArray
+    atom_mass: FloatArray
 
 
 def read_phonon_dos_data(
@@ -22,7 +48,7 @@ def read_phonon_dos_data(
         cell_vectors_unit: str = 'angstrom',
         atom_mass_unit: str = 'amu',
         frequencies_unit: str = 'meV',
-        mode_gradients_unit: str = 'meV*angstrom') -> dict[str, Any]:
+        mode_gradients_unit: str = 'meV*angstrom') -> DOSData:
     """
     Reads data from a .phonon_dos file and returns it in a dictionary
 
@@ -78,16 +104,17 @@ def read_phonon_dos_data(
         dos_data = np.loadtxt(f, max_rows=n_bins)
 
     data_dict: dict[str, Any] = {}
-    cry_dict = data_dict['crystal'] = {}
-    cry_dict['n_atoms'] = n_atoms
-    cry_dict['cell_vectors'] = (cell_vectors*ureg('angstrom').to(
-        cell_vectors_unit)).magnitude
-    cry_dict['cell_vectors_unit'] = cell_vectors_unit
-    cry_dict['atom_r'] = atom_r
-    cry_dict['atom_type'] = atom_type
-    cry_dict['atom_mass'] = atom_mass*(ureg('amu')).to(
-        atom_mass_unit).magnitude
-    cry_dict['atom_mass_unit'] = atom_mass_unit
+    data_dict['crystal'] = {
+        'n_atoms': n_atoms,
+        'cell_vectors': (cell_vectors*ureg('angstrom').to(
+            cell_vectors_unit)).magnitude,
+        'cell_vectors_unit': cell_vectors_unit,
+        'atom_r': atom_r,
+        'atom_type': atom_type,
+        'atom_mass': atom_mass*(ureg('amu')).to(
+            atom_mass_unit).magnitude,
+        'atom_mass_unit': atom_mass_unit,
+    }
 
     data_dict['qpts'] = qpts
     data_dict['weights'] = weights
@@ -279,9 +306,7 @@ def read_phonon_data(
     return data_dict
 
 
-def _read_crystal_info(
-        f: TextIO, n_atoms: int,
-        ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _read_crystal_info(f: TextIO, n_atoms: int) -> CellData:
     """
     Reads the header crystal information from a CASTEP text file, from
     'Unit cell vectors' to 'END header'
@@ -319,7 +344,7 @@ def _read_crystal_info(
     atom_mass = np.array([float(x[5]) for x in atom_info])
     f.readline()  # Skip END header line
 
-    return cell_vectors, atom_r, atom_type, atom_mass
+    return CellData(cell_vectors, atom_r, atom_type, atom_mass)
 
 
 _qpt_index_pattern = re.compile(r'q-pt=\s*(\d+)')
@@ -393,7 +418,7 @@ def _read_frequency_block(
 
     direction: np.ndarray | None = None
     if len(floats) >= 6:
-        direction = floats[4:7]
+        direction = np.array(floats[4:7], dtype=np.float64)
 
     freq_lines = [f.readline().split()
                   for i in range(n_branches)]
@@ -647,9 +672,23 @@ def _read_cell(file_obj: BinaryIO, int_type: str, float_type: str,
 
     return n_atoms, cell_vectors, atom_r, atom_mass, atom_type
 
+@overload
+def _read_entry(file_obj: BinaryIO,
+                dtype: Literal['>i4']) -> int | IntArray: ...
+
+@overload
+def _read_entry(file_obj: BinaryIO,
+                dtype: Literal['>f8']) -> float | FloatArray: ...
+
+@overload
+def _read_entry(file_obj: BinaryIO, dtype: Literal['S8']) -> str: ...
+
+@overload
+def _read_entry(file_obj: BinaryIO, dtype: str = '') -> bytes: ...
+
 
 def _read_entry(file_obj: BinaryIO, dtype: str = '',
-                ) -> str | int | float | np.ndarray:
+                ) -> str | int | float | FloatArray | IntArray:
     """
     Read a record from a Fortran binary file, including the beginning
     and end record markers and return the data inbetween

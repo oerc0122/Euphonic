@@ -4,10 +4,11 @@
 """
 
 from collections import Counter
+from collections.abc import Iterable, Sequence
 from itertools import pairwise
 import json
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import TypedDict
 
 import numpy as np
 
@@ -18,6 +19,16 @@ from euphonic.util import _calc_abscissa, get_qpoint_labels
 
 ComplexPair = tuple[float, float]
 
+class CrystalWebData(TypedDict):
+    """Partial data for website."""
+    natoms: int
+    lattice: list[list[float]]
+    atom_types: list[str]
+    atom_numbers: list[int]
+    formula: str
+    atom_pos_red: list[list[float]]
+    atom_pos_car: list[list[float]]
+
 
 class PhononWebsiteData(TypedDict):
     """Data container for export to phonon visualisation website
@@ -27,15 +38,8 @@ class PhononWebsiteData(TypedDict):
     line_breaks are currently not implemented
 
     """
-    name: str
-    natoms: int
-    lattice: list[list[float]]
-    atom_types: list[str]
-    atom_numbers: list[int]
-    formula: str
-    repetitions: list[int]
-    atom_pos_car: list[list[float]]
-    atom_pos_red: list[list[float]]
+    name: str | None
+    repetitions: Sequence[int]
     highsym_qpts: list[tuple[int, str]]
     qpoints: list[list[float]]
     distances: list[float]  # Cumulative distance from first q-point
@@ -76,7 +80,7 @@ def write_phonon_website_json(
                   fd)
 
 
-def _crystal_website_data(crystal: Crystal) -> dict[str, Any]:
+def _crystal_website_data(crystal: Crystal) -> CrystalWebData:
     elements = [
         '_', 'H', 'He', 'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne', 'Na',
         'Mg', 'Al', 'Si', 'P', 'S', 'Cl', 'Ar', 'K', 'Ca', 'Sc', 'Ti', 'V',
@@ -96,7 +100,7 @@ def _crystal_website_data(crystal: Crystal) -> dict[str, Any]:
         except ValueError:  # Symbol not found
             return 0
 
-    def symbols_to_formula(symbols: list[str]) -> str:
+    def symbols_to_formula(symbols: Iterable[str]) -> str:
         symbol_counts = Counter(symbols)
 
         return ''.join(f'{symbol}{symbol_counts[symbol]}'
@@ -214,7 +218,7 @@ def _modes_to_phonon_website_dict(
     return PhononWebsiteData(
         name=name,
         **_crystal_website_data(modes.crystal),
-        highsym_qpts=x_tick_labels,
+        highsym_qpts=list(x_tick_labels),
         distances=abscissa.magnitude.tolist(),
         qpoints=modes.qpts.tolist(),
         eigenvalues=modes.frequencies.to('1/cm').magnitude.tolist(),
@@ -222,4 +226,3 @@ def _modes_to_phonon_website_dict(
         repetitions=repetitions,
         line_breaks=line_breaks,
     )
-

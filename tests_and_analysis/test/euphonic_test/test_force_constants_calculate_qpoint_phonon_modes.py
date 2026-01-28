@@ -157,13 +157,13 @@ class TestForceConstantsCalculateQPointPhononModes:
          'expected_modg_file'),
         [(get_quartz_fc(),
           'quartz',
-          [mp_grid([5, 5, 4]),
+          [mp_grid((5, 5, 4)),
            {'return_mode_gradients': True}],
           'quartz_554_full_qpoint_phonon_modes.json',
           'quartz_554_full_mode_gradients.json'),
          (get_lzo_fc(),
           'LZO',
-          [mp_grid([2, 2, 2]),
+          [mp_grid((2, 2, 2)),
            {'asr': 'reciprocal', 'return_mode_gradients': True}],
           'lzo_222_full_qpoint_phonon_modes.json',
           'lzo_222_full_mode_gradients.json')])
@@ -209,6 +209,7 @@ class TestForceConstantsCalculateQPointPhononModes:
             def _calculate_phonons_at_q(self, *args):
                 freqs, evecs, grads = ForceConstants._calculate_phonons_at_q(
                     self, *args)
+                assert grads is not None
                 mocked_grads = np.ones(grads.shape) + np.ones(grads.shape)*1j
                 return freqs, evecs, mocked_grads
         mocker.patch('euphonic.ForceConstants', MockFC)

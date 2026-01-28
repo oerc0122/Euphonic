@@ -15,13 +15,13 @@ from euphonic import (
     Spectrum1DCollection,
 )
 from euphonic.util import RNG, get_reference_data, mp_grid, rng
-
+from euphonic.types import FloatArray
 SphericalSamplingOptions = Literal['golden',
                                    'sphere-projected-grid',
                                    'spherical-polar-grid',
                                    'spherical-polar-improved',
                                    'random-sphere']
-
+Weightings = Literal['coherent', 'incoherent', 'coherent-plus-incoherent']
 
 def sample_sphere_dos(fc: ForceConstants,
                       mod_q: Quantity,
@@ -121,7 +121,7 @@ def sample_sphere_pdos(
         npts: int = 1000,
         jitter: bool = False,
         energy_bins: Quantity = None,
-        weighting: str | None = None,
+        weighting: Weightings | None = None,
         cross_sections: str | dict[str, Quantity] = 'BlueBook',
         rng: RNG = rng,
         **calc_modes_args,
@@ -234,12 +234,12 @@ def sample_sphere_pdos(
 def sample_sphere_structure_factor(
     fc: ForceConstants,
     mod_q: Quantity,
-    dw: DebyeWaller = None,
+    dw: DebyeWaller | None = None,
     dw_spacing: Quantity = Quantity(0.025, '1/angstrom'),
     temperature: Quantity | None = Quantity(273., 'K'),
     sampling: SphericalSamplingOptions = 'golden',
     npts: int = 1000, jitter: bool = False,
-    energy_bins: Quantity = None,
+    energy_bins: Quantity | None = None,
     scattering_lengths: str | dict[str, Quantity] = 'Sears1992',
     rng: RNG = rng,
     **calc_modes_args,
@@ -372,7 +372,7 @@ def _get_default_bins(phonons: QpointPhononModes | QpointFrequencies,
 
 
 def _qpts_cart_to_frac(qpts: Quantity,
-                       crystal: Crystal) -> np.ndarray:
+                       crystal: Crystal) -> FloatArray:
     """Convert set of q-points from Cartesian to fractional coordinates
 
     Parameters
@@ -396,7 +396,7 @@ def _qpts_cart_to_frac(qpts: Quantity,
 def _get_qpts_sphere(npts: int,
                      sampling: SphericalSamplingOptions = 'golden',
                      jitter: bool = False,
-                     rng: RNG = rng) -> np.ndarray:
+                     rng: RNG = rng) -> FloatArray:
     """Get q-point coordinates according to specified sampling scheme
 
     Note that the return value is dimensionless; the sphere radius is

@@ -2,6 +2,7 @@ from argparse import SUPPRESS, ArgumentParser, Namespace
 from collections.abc import Sequence
 import itertools
 from pathlib import Path
+from typing import Literal
 
 from matplotlib.axes import Axes
 from matplotlib.lines import Line2D
@@ -9,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from euphonic import ForceConstants, Spectrum1D, ureg
-from euphonic.brille import BrilleInterpolator
+from euphonic.brille import BrilleInterpolator, ValidGrids
 from euphonic.cli.utils import (
     _brille_calc_modes_kwargs,
     _get_cli_parser,
@@ -22,11 +23,11 @@ from euphonic.sampling import recurrence_sequence
 
 def main(params: list[str] | None = None) -> None:
     args = get_args(get_parser(), params)
-    params = vars(args)
+    kwargs = vars(args)
 
-    match params['energy_broadening']:
+    match kwargs['energy_broadening']:
         case int(value) | float(value) | [int(value)] | [float(value)]:
-            params['energy_broadening'] = value
+            kwargs['energy_broadening'] = value
         case None:
             pass
         case _:
@@ -34,14 +35,14 @@ def main(params: list[str] | None = None) -> None:
                    '(i.e. --energy-broadening should be a single value)')
             raise ValueError(msg)
 
-    check_brille_settings(**params)
+    check_brille_settings(**kwargs)
 
 
 def check_brille_settings(
         filename: Path | str,
         npts: int = 500,
         use_brille: bool = True,  # noqa: ARG001  # Removal scheduled for v2
-        brille_grid_type: str = 'trellis',
+        brille_grid_type: ValidGrids = 'trellis',
         brille_npts: int = 5000,
         brille_npts_density: int | None = None,
         n: int = 0,
@@ -50,7 +51,7 @@ def check_brille_settings(
         e_min: float | None = None,
         e_max: float | None = None,
         energy_unit: str = 'meV',
-        shape: str = 'gauss',
+        shape: Literal['gauss', 'lorentz'] = 'gauss',
         **calc_modes_kwargs,
         ) -> None:
 
@@ -68,6 +69,7 @@ def check_brille_settings(
         recurrence_sequence(npts, order=3)), dtype=float).reshape(-1, 3)
 
     # Calculate Euphonic frequencies, structure factors and intensities
+    assert not calc_modes_kwargs.get('return_mode_gradients')
     modes = fc.calculate_qpoint_phonon_modes(qpts, **calc_modes_kwargs)
     modes.frequencies_unit = energy_unit
     sf = modes.calculate_structure_factor()

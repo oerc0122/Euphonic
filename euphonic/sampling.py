@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from itertools import product
 
 import numpy as np
+import numpy.typing as npt
 from scipy.optimize import fmin
 
 from euphonic.util import RNG, rng
@@ -104,7 +105,8 @@ def regular_square(n_rows: int, n_cols: int,
                y + y_offset + delta_y)
 
 
-def _spherical_polar_to_cartesian(phi, theta):
+def _spherical_polar_to_cartesian(phi: npt.ArrayLike,
+                                  theta: npt.ArrayLike) -> npt.ArrayLike:
     return (np.cos(phi) * np.sin(theta),
             np.sin(phi) * np.sin(theta),
             np.cos(theta))
@@ -340,7 +342,7 @@ def spherical_polar_improved(npts: int,
                 yield (1, phi, theta)
 
 
-def random_sphere(npts, cartesian: bool = True, rng: RNG = rng,
+def random_sphere(npts: int, cartesian: bool = True, rng: RNG = rng,
                   ) -> Iterator[tuple[float, float, float]]:
     """Yield a series of 3D points on a unit sphere surface
 
